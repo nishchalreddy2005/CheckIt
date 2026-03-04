@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 
 type ToastProps = {
+  id?: string
   title?: string
   description?: string
   duration?: number

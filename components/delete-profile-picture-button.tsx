@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Loader2, Trash2 } from "lucide-react"
-import { deleteProfilePictureDirectly } from "@/app/actions/profile-picture-delete"
+import { deleteProfilePicture } from "@/app/actions/profile-actions"
 import { useRouter } from "next/navigation"
 import {
   AlertDialog,
@@ -26,7 +26,7 @@ export function DeleteProfilePictureButton() {
     setIsDeleting(true)
 
     try {
-      const result = await deleteProfilePictureDirectly()
+      const result = await deleteProfilePicture()
 
       if (result.success) {
         toast({
@@ -34,7 +34,6 @@ export function DeleteProfilePictureButton() {
           description: "Profile picture deleted successfully",
         })
 
-        // Force a refresh to update the UI
         router.refresh()
       } else {
         toast({

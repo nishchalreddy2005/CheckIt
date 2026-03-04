@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2 } from "lucide-react"
+import { Loader2, LogOut } from "lucide-react"
 
 interface LogoutButtonProps {
   className?: string
@@ -37,12 +37,9 @@ export function LogoutButton({ className = "" }: LogoutButtonProps) {
       className={`text-sm font-medium hover:underline ${className}`}
     >
       {isLoggingOut ? (
-        <>
-          <Loader2 className="inline mr-2 h-4 w-4 animate-spin" />
-          Logging out...
-        </>
+        <Loader2 className="h-5 w-5 animate-spin" />
       ) : (
-        "Logout"
+        <LogOut className="h-5 w-5" />
       )}
     </button>
   )

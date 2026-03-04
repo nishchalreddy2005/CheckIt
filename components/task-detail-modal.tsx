@@ -57,7 +57,7 @@ export function TaskDetailModal({ task, open, onOpenChange, onEdit, onDelete, on
         toast({
           title: "Congratulations! 🎉",
           description: "You've successfully completed the task!",
-          variant: "success",
+          variant: "default",
         })
 
         // Optimized confetti animation
@@ -227,9 +227,22 @@ export function TaskDetailModal({ task, open, onOpenChange, onEdit, onDelete, on
                 Due Date
               </div>
               <p className="text-sm font-medium">
-                {task.dueDate.includes("T")
-                  ? format(new Date(task.dueDate), "PPP 'at' h:mm a")
-                  : format(new Date(task.dueDate), "PPP")}
+                {(() => {
+                  if (!task.dueDate) return "No due date";
+
+                  let hasTime = false;
+                  if (task.dueDate instanceof Date) {
+                    const iso = task.dueDate.toISOString();
+                    hasTime = iso.includes("T") && iso.split("T")[1] !== "00:00:00.000Z";
+                  } else if (typeof task.dueDate === 'string') {
+                    const dateStr = task.dueDate as string;
+                    hasTime = dateStr.includes("T") && !dateStr.endsWith("T00:00:00.000Z");
+                  }
+
+                  return hasTime
+                    ? format(new Date(task.dueDate), "PPP 'at' h:mm a")
+                    : format(new Date(task.dueDate), "PPP");
+                })()}
               </p>
             </div>
 
@@ -238,7 +251,7 @@ export function TaskDetailModal({ task, open, onOpenChange, onEdit, onDelete, on
                 <Clock className="mr-2 h-4 w-4" />
                 Created
               </div>
-              <p className="text-sm font-medium">{format(new Date(task.createdAt), "PPP")}</p>
+              <p className="text-sm font-medium">{task.createdAt ? format(new Date(task.createdAt), "PPP") : "Unknown"}</p>
             </div>
           </div>
 
@@ -248,7 +261,7 @@ export function TaskDetailModal({ task, open, onOpenChange, onEdit, onDelete, on
                 <Tag className="mr-2 h-4 w-4" />
                 Category
               </div>
-              <Badge className={getCategoryColor(task.category)}>{task.category}</Badge>
+              <Badge className={getCategoryColor(task.category || "General")}>{task.category || "General"}</Badge>
             </div>
 
             <div className="space-y-2">
@@ -256,8 +269,8 @@ export function TaskDetailModal({ task, open, onOpenChange, onEdit, onDelete, on
                 <AlertTriangle className="mr-2 h-4 w-4" />
                 Priority
               </div>
-              <Badge className={getPriorityColor(task.priority)}>
-                {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+              <Badge className={getPriorityColor(task.priority || "medium")}>
+                {(task.priority || "medium").charAt(0).toUpperCase() + (task.priority || "medium").slice(1)}
               </Badge>
             </div>
           </div>
@@ -267,7 +280,9 @@ export function TaskDetailModal({ task, open, onOpenChange, onEdit, onDelete, on
               <CheckCircle2 className="mr-2 h-4 w-4" />
               Status
             </div>
-            <Badge variant={task.completed ? "success" : "outline"}>{task.completed ? "Completed" : "Pending"}</Badge>
+            <Badge variant={task.completed ? "default" : "outline"} className={task.completed ? "bg-green-500 hover:bg-green-600" : ""}>
+              {task.completed ? "Completed" : "Pending"}
+            </Badge>
           </div>
         </div>
 

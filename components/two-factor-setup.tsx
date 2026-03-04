@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2 } from "lucide-react"
 import { enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor } from "@/app/actions/profile-actions"
-import Image from "next/image"
 import type { User } from "@/lib/types"
 
 interface TwoFactorSetupProps {
@@ -19,10 +18,7 @@ export function TwoFactorSetup({ user }: TwoFactorSetupProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [setupData, setSetupData] = useState<{
-    secret: string
-    qrCodeUrl: string
-  } | null>(null)
+  const [isVerifying, setIsVerifying] = useState(false)
 
   async function handleEnable() {
     setLoading(true)
@@ -32,11 +28,8 @@ export function TwoFactorSetup({ user }: TwoFactorSetupProps) {
     try {
       const result = await enableTwoFactor()
 
-      if (result.success && result.secret && result.qrCodeUrl) {
-        setSetupData({
-          secret: result.secret,
-          qrCodeUrl: result.qrCodeUrl,
-        })
+      if (result.success) {
+        setIsVerifying(true)
       } else {
         setError(result.message)
       }
@@ -57,7 +50,7 @@ export function TwoFactorSetup({ user }: TwoFactorSetupProps) {
 
       if (result.success) {
         setSuccess(true)
-        setSetupData(null)
+        setIsVerifying(false)
         // Refresh the page to update the user state
         window.location.reload()
       } else {
@@ -96,31 +89,30 @@ export function TwoFactorSetup({ user }: TwoFactorSetupProps) {
 
   if (user.twoFactorEnabled) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Two-Factor Authentication</CardTitle>
-          <CardDescription>Two-factor authentication is currently enabled for your account</CardDescription>
+      <Card className="bg-transparent border-none shadow-none text-white p-0">
+        <CardHeader className="px-0 pt-0">
+          <CardTitle className="text-white/90">Two-Factor Authentication</CardTitle>
+          <CardDescription className="text-emerald-400">Two-factor authentication is currently enabled for your account</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-0 pb-2">
           {error && (
-            <Alert variant="destructive" className="mb-4">
+            <Alert variant="destructive" className="mb-4 bg-red-500/10 border-red-500/30 text-red-200">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
           {success && (
-            <Alert className="mb-4">
+            <Alert className="mb-4 bg-emerald-500/10 border-emerald-500/30 text-emerald-200">
               <AlertDescription>Two-factor authentication has been disabled</AlertDescription>
             </Alert>
           )}
 
-          <p className="mb-4">
-            Two-factor authentication adds an extra layer of security to your account by requiring a verification code
-            from your authenticator app in addition to your password.
+          <p className="mb-4 text-white/70">
+            Two-factor authentication adds an extra layer of security to your account by requiring an email verification code in addition to your password.
           </p>
         </CardContent>
-        <CardFooter>
-          <Button variant="destructive" onClick={handleDisable} disabled={loading} className="w-full">
+        <CardFooter className="px-0 pb-0">
+          <Button variant="destructive" onClick={handleDisable} disabled={loading} className="w-full bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 border border-red-500/30">
             {loading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -135,37 +127,26 @@ export function TwoFactorSetup({ user }: TwoFactorSetupProps) {
     )
   }
 
-  if (setupData) {
+  if (isVerifying) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Set Up Two-Factor Authentication</CardTitle>
-          <CardDescription>Scan the QR code with your authenticator app</CardDescription>
+      <Card className="bg-transparent border-none shadow-none text-white p-0">
+        <CardHeader className="px-0 pt-0">
+          <CardTitle className="text-white/90">Verify Email Address</CardTitle>
+          <CardDescription className="text-indigo-300">Enter the 6-digit code sent to your email to confirm</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 px-0 pb-0">
           {error && (
-            <Alert variant="destructive" className="mb-4">
+            <Alert variant="destructive" className="mb-4 bg-red-500/10 border-red-500/30 text-red-200">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
-          <div className="flex justify-center">
-            <div className="bg-white p-2 rounded">
-              <Image src={setupData.qrCodeUrl || "/placeholder.svg"} alt="QR Code" width={200} height={200} />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="secret">Secret Key (if you can't scan the QR code)</Label>
-            <Input id="secret" value={setupData.secret} readOnly onClick={(e) => e.currentTarget.select()} />
-          </div>
-
-          <form action={handleVerify} className="space-y-4">
+          <form action={handleVerify} className="space-y-4 mt-6 p-4 bg-white/5 border border-white/10 rounded-xl">
             <div className="space-y-2">
-              <Label htmlFor="token">Verification Code</Label>
-              <Input id="token" name="token" placeholder="Enter the 6-digit code" required />
+              <Label htmlFor="token" className="text-white/80">Verification Code</Label>
+              <Input id="token" name="token" placeholder="Enter the 6-digit code" required className="glass-input text-center text-xl tracking-widest letter-spacing-2" maxLength={6} />
             </div>
-            <Button type="submit" disabled={loading} className="w-full">
+            <Button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(52,211,153,0.4)] border-none mt-2">
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -182,17 +163,16 @@ export function TwoFactorSetup({ user }: TwoFactorSetupProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Two-Factor Authentication</CardTitle>
-        <CardDescription>Add an extra layer of security to your account</CardDescription>
+    <Card className="bg-transparent border-none shadow-none text-white p-0">
+      <CardHeader className="px-0 pt-0">
+        <CardTitle className="text-white/90">Two-Factor Authentication</CardTitle>
+        <CardDescription className="text-white/60">Add an extra layer of security to your account</CardDescription>
       </CardHeader>
-      <CardContent>
-        <p className="mb-4">
-          Two-factor authentication adds an extra layer of security to your account by requiring a verification code
-          from your authenticator app in addition to your password.
+      <CardContent className="px-0 pb-0">
+        <p className="mb-4 text-white/70">
+          Two-factor authentication adds an extra layer of security to your account by requiring an email verification code in addition to your password.
         </p>
-        <Button onClick={handleEnable} disabled={loading} className="w-full">
+        <Button onClick={handleEnable} disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)] border-none">
           {loading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -11,7 +11,7 @@ export async function middleware(request: NextRequest) {
   console.log(`Middleware processing path: ${path}`)
 
   // Public routes that don't require authentication
-  const publicRoutes = ["/", "/login", "/register", "/demo"]
+  const publicRoutes = ["/", "/login", "/register", "/demo", "/forgot-password", "/reset-password", "/verify-email", "/terms", "/privacy", "/help", "/sw.js", "/manifest.json"]
   if (publicRoutes.includes(path)) {
     return NextResponse.next()
   }
@@ -23,7 +23,7 @@ export async function middleware(request: NextRequest) {
 
   try {
     // Validate session
-    const { valid, userId } = await validateSession(sessionId)
+    const { valid, userId, isAdmin, isSuperadmin } = await validateSession(sessionId)
 
     if (!valid || !userId) {
       console.log("Invalid session detected in middleware")
@@ -39,7 +39,7 @@ export async function middleware(request: NextRequest) {
     // Check if this is a superadmin route
     if (path.startsWith("/superadmin")) {
       // Check if user is a superadmin
-      if (!userId.startsWith("superadmin-")) {
+      if (!isSuperadmin) {
         return NextResponse.redirect(new URL("/dashboard", request.url))
       }
     }
@@ -47,13 +47,13 @@ export async function middleware(request: NextRequest) {
     // Check if this is an admin route
     if (path.startsWith("/admin")) {
       // Check if user is an admin or superadmin
-      if (!userId.startsWith("admin-") && !userId.startsWith("superadmin-")) {
+      if (!isAdmin && !isSuperadmin) {
         return NextResponse.redirect(new URL("/dashboard", request.url))
       }
     }
 
     return NextResponse.next()
-  } catch (error) {
+  } catch (error: any) {
     console.error("Middleware error:", error)
 
     // Only redirect on critical errors, not for navigation issues

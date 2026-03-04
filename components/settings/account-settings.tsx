@@ -22,7 +22,7 @@ const initialState = {
 }
 
 // Action wrapper for useActionState
-const updateProfileAction = async (prevState, formData) => {
+const updateProfileAction = async (prevState: any, formData: FormData) => {
   const result = await updateProfile(formData)
   return {
     message: result.message,
@@ -35,14 +35,12 @@ export function AccountSettings({ user }: { user: User }) {
   const router = useRouter()
   const [state, formAction, isPending] = useActionState(updateProfileAction, initialState)
   const [currentUser, setCurrentUser] = useState(user)
-  const [language, setLanguage] = useState(user.language || "en")
   const [timezone, setTimezone] = useState(user.timezone || "UTC")
   const [showMessage, setShowMessage] = useState(false)
 
   // Update local state when user prop changes
   useEffect(() => {
     setCurrentUser(user)
-    setLanguage(user.language || "en")
     setTimezone(user.timezone || "UTC")
   }, [user])
 
@@ -51,7 +49,6 @@ export function AccountSettings({ user }: { user: User }) {
     if (state.success && state.user) {
       // Update local state with new values
       setCurrentUser(state.user)
-      setLanguage(state.user.language || "en")
       setTimezone(state.user.timezone || "UTC")
 
       // Show message
@@ -79,70 +76,53 @@ export function AccountSettings({ user }: { user: User }) {
       <form action={formAction} className="space-y-4">
         <div className="flex flex-col items-center mb-6">
           <ProfilePicture user={currentUser} size="lg" onUpdate={(updatedUser) => setCurrentUser(updatedUser)} />
-          <p className="text-sm text-muted-foreground mt-2">Upload a profile picture</p>
+          <p className="text-sm text-white/50 mt-3 font-medium">Upload a profile picture</p>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="name">Full Name</Label>
-          <Input id="name" name="name" defaultValue={currentUser.name} required />
+          <Label htmlFor="name" className="text-white/80">Full Name</Label>
+          <Input id="name" name="name" defaultValue={currentUser.name} required className="glass-input" />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" name="email" type="email" defaultValue={currentUser.email} required />
+          <Label htmlFor="email" className="text-white/80">Email</Label>
+          <Input id="email" name="email" type="email" defaultValue={currentUser.email} required className="glass-input opacity-70" readOnly />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="bio">Bio</Label>
-          <Input id="bio" name="bio" defaultValue={currentUser.bio || ""} placeholder="Tell us about yourself" />
+          <Label htmlFor="bio" className="text-white/80">Bio</Label>
+          <Input id="bio" name="bio" defaultValue={currentUser.bio || ""} placeholder="Tell us about yourself" className="glass-input" />
         </div>
 
-        <div className="space-y-2">
-          <Label>Theme Preference</Label>
-          <RadioGroup defaultValue={currentUser.theme || "light"} name="theme" className="flex space-x-4">
+        <div className="space-y-3 pt-2">
+          <Label className="text-white/80">Theme Preference</Label>
+          <RadioGroup defaultValue={currentUser.theme || "dark"} name="theme" className="flex space-x-6">
             <div className="flex items-center space-x-2">
-              <RadioGroupItem value="light" id="light" />
-              <Label htmlFor="light">Light</Label>
+              <RadioGroupItem value="light" id="light" className="border-white/40 text-white" />
+              <Label htmlFor="light" className="text-white/70 cursor-pointer">Light</Label>
             </div>
             <div className="flex items-center space-x-2">
-              <RadioGroupItem value="dark" id="dark" />
-              <Label htmlFor="dark">Dark</Label>
+              <RadioGroupItem value="dark" id="dark" className="border-indigo-400 text-indigo-400" />
+              <Label htmlFor="dark" className="text-indigo-300 font-medium cursor-pointer drop-shadow-[0_0_5px_rgba(99,102,241,0.5)]">Dark</Label>
             </div>
             <div className="flex items-center space-x-2">
-              <RadioGroupItem value="system" id="system" />
-              <Label htmlFor="system">System</Label>
+              <RadioGroupItem value="system" id="system" className="border-white/40 text-white" />
+              <Label htmlFor="system" className="text-white/70 cursor-pointer">System</Label>
             </div>
           </RadioGroup>
         </div>
 
-        <Separator className="my-4" />
+        <Separator className="my-6 bg-white/10" />
 
-        <div className="space-y-4">
-          <h3 className="text-lg font-medium">Extended Settings</h3>
-
-          <div className="space-y-2">
-            <Label htmlFor="language">Language</Label>
-            <select
-              id="language"
-              name="language"
-              className="w-full rounded-md border border-input bg-background px-3 py-2"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-            >
-              <option value="en">English</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="zh">Chinese</option>
-            </select>
-          </div>
+        <div className="space-y-5">
+          <h3 className="text-lg font-medium text-white/90">Extended Settings</h3>
 
           <div className="space-y-2">
-            <Label htmlFor="timezone">Timezone</Label>
+            <Label htmlFor="timezone" className="text-white/80">Timezone</Label>
             <select
               id="timezone"
               name="timezone"
-              className="w-full rounded-md border border-input bg-background px-3 py-2"
+              className="w-full rounded-md border border-white/20 bg-black/40 text-white px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500/50 [&>option]:bg-[#030014]"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
             >
@@ -157,26 +137,26 @@ export function AccountSettings({ user }: { user: User }) {
         </div>
 
         {showMessage && state.success && (
-          <Alert variant="default" className="bg-green-50 text-green-700 border-green-200">
+          <Alert variant="default" className="bg-emerald-500/10 border-emerald-500/30 text-emerald-200 backdrop-blur-md">
             <AlertDescription>
               {state.message}
-              <p className="text-xs mt-1">Your settings have been updated. Changes will be applied immediately.</p>
+              <p className="text-xs mt-1 text-emerald-200/70">Your settings have been updated. Changes will be applied immediately.</p>
             </AlertDescription>
           </Alert>
         )}
 
         {!showMessage && state.message && !state.success && (
-          <Alert variant="destructive">
+          <Alert variant="destructive" className="bg-pink-500/10 border-pink-500/30 text-pink-200 backdrop-blur-md">
             <AlertDescription>{state.message}</AlertDescription>
           </Alert>
         )}
 
-        <Button type="submit" disabled={isPending}>
+        <Button type="submit" disabled={isPending} className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)] border-none w-full sm:w-auto mt-2">
           {isPending ? "Saving..." : "Save Changes"}
         </Button>
       </form>
 
-      <Separator />
+      <Separator className="bg-white/10" />
 
       <DeleteAccount />
     </div>

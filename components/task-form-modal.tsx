@@ -10,11 +10,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { createTask, updateTask } from "@/app/actions/task-actions"
 import type { Task } from "@/lib/types"
 import { format, setHours } from "date-fns"
 import { getTasks } from "@/app/actions/task-actions"
+import { UserMultiSelect } from "@/components/user-multi-select"
 
 interface TaskFormModalProps {
   open: boolean
@@ -30,14 +31,19 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
   const [error, setError] = useState<string | null>(null)
   const [isCustomCategory, setIsCustomCategory] = useState(false)
   const [existingCategories, setExistingCategories] = useState<string[]>(["Work", "Personal", "Health", "Learning"])
+  const [availableTasks, setAvailableTasks] = useState<Task[]>([])
 
   // Format the initial date for the form
   const formatInitialDate = () => {
     if (initialDate) {
       return format(initialDate, "yyyy-MM-dd")
     }
-    if (taskToEdit) {
-      return taskToEdit.dueDate.split("T")[0]
+    if (taskToEdit && taskToEdit.dueDate) {
+      try {
+        return format(new Date(taskToEdit.dueDate), "yyyy-MM-dd")
+      } catch (e) {
+        return new Date().toISOString().split("T")[0]
+      }
     }
     return new Date().toISOString().split("T")[0]
   }
@@ -47,10 +53,12 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
     if (initialDate && initialHour !== undefined) {
       return format(setHours(initialDate, initialHour), "HH:mm")
     }
-    if (taskToEdit && taskToEdit.dueDate.includes("T")) {
-      // Extract time from task due date if available
-      const timePart = taskToEdit.dueDate.split("T")[1]
-      return timePart ? timePart.substring(0, 5) : "09:00"
+    if (taskToEdit && taskToEdit.dueDate) {
+      try {
+        return format(new Date(taskToEdit.dueDate), "HH:mm")
+      } catch (e) {
+        return "09:00"
+      }
     }
     return format(new Date(), "HH:mm") // Default to current time
   }
@@ -63,16 +71,22 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
     category: "Work",
     customCategory: "",
     priority: "medium" as "low" | "medium" | "high",
+    sharedWith: "",
+    parentId: "",
+    dependsOn: "",
+    recurrenceRule: "none",
   })
 
-  // Fetch existing categories from tasks
+  // Fetch data from tasks
   useEffect(() => {
-    const fetchCategories = async () => {
+    const fetchData = async () => {
       try {
-        const tasks = await getTasks()
-        if (Array.isArray(tasks) && tasks.length > 0) {
+        const tasksData = await getTasks()
+        if (Array.isArray(tasksData)) {
+          setAvailableTasks(tasksData)
+
           const categories = new Set<string>(["Work", "Personal", "Health", "Learning"])
-          tasks.forEach((task) => {
+          tasksData.forEach((task) => {
             if (task.category) {
               categories.add(task.category)
             }
@@ -80,36 +94,45 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
           setExistingCategories(Array.from(categories))
         }
       } catch (error) {
-        console.error("Error fetching categories:", error)
+        console.error("Error fetching data for modal:", error)
       }
     }
 
-    fetchCategories()
+    fetchData()
   }, [open])
 
   // Update form data when editing a task
   useEffect(() => {
     if (taskToEdit) {
-      const dateOnly = taskToEdit.dueDate.split("T")[0]
-      let timeOnly = "09:00" // Default time
+      let dateOnly = ""
+      let timeOnly = "09:00"
 
-      if (taskToEdit.dueDate.includes("T")) {
-        const timePart = taskToEdit.dueDate.split("T")[1]
-        timeOnly = timePart ? timePart.substring(0, 5) : "09:00"
+      if (taskToEdit.dueDate) {
+        try {
+          const dateObj = new Date(taskToEdit.dueDate)
+          dateOnly = format(dateObj, "yyyy-MM-dd")
+          timeOnly = format(dateObj, "HH:mm")
+        } catch (e) {
+          // fallback handled below
+        }
       }
 
       // Check if the task has a custom category
-      const isCustom = !["Work", "Personal", "Health", "Learning"].includes(taskToEdit.category)
+      const isCustom = !["Work", "Personal", "Health", "Learning"].includes(taskToEdit.category || "")
       setIsCustomCategory(isCustom)
 
       setFormData({
-        title: taskToEdit.title,
-        description: taskToEdit.description,
+        title: taskToEdit.title || "",
+        description: taskToEdit.description || "",
         dueDate: dateOnly,
         dueTime: timeOnly,
-        category: isCustom ? "custom" : taskToEdit.category,
-        customCategory: isCustom ? taskToEdit.category : "",
-        priority: taskToEdit.priority,
+        category: isCustom ? "custom" : (taskToEdit.category || "Work"),
+        customCategory: isCustom ? (taskToEdit.category || "") : "",
+        priority: (taskToEdit.priority as "low" | "medium" | "high") || "medium",
+        sharedWith: taskToEdit.sharedWith ? (taskToEdit.sharedWith as string[]).join(", ") : "",
+        parentId: taskToEdit.parentId || "",
+        dependsOn: taskToEdit.dependsOn || "",
+        recurrenceRule: taskToEdit.recurrenceRule || "none",
       })
     } else if (initialDate) {
       setFormData({
@@ -120,6 +143,10 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
         category: "Work",
         customCategory: "",
         priority: "medium",
+        sharedWith: "",
+        parentId: "",
+        dependsOn: "",
+        recurrenceRule: "none",
       })
       setIsCustomCategory(false)
     } else {
@@ -132,6 +159,10 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
         category: "Work",
         customCategory: "",
         priority: "medium",
+        sharedWith: "",
+        parentId: "",
+        dependsOn: "",
+        recurrenceRule: "none",
       })
       setIsCustomCategory(false)
     }
@@ -167,8 +198,10 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
         formDataObj.append("id", taskToEdit.id)
       }
 
-      // Combine date and time
-      const dateTimeString = `${formData.dueDate}T${formData.dueTime}:00`
+      // Combine date and time (Ensure it's a valid local ISO string format)
+      // e.g. "2024-03-10T14:30"
+      const timePart = formData.dueTime ? formData.dueTime : "09:00"
+      const dateTimeString = `${formData.dueDate}T${timePart}`
 
       // Determine the actual category to use
       const categoryToUse = isCustomCategory ? formData.customCategory : formData.category
@@ -184,6 +217,17 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
       formDataObj.append("dueDate", dateTimeString)
       formDataObj.append("category", categoryToUse)
       formDataObj.append("priority", formData.priority)
+
+      // Parse comma separated usernames for the multiplayer array
+      if (formData.sharedWith.trim()) {
+        const usernames = formData.sharedWith.split(',').map(u => u.trim()).filter(u => u)
+        formDataObj.append("sharedWith", JSON.stringify(usernames))
+      }
+
+      // Add Advanced fields
+      if (formData.parentId && formData.parentId !== "none") formDataObj.append("parentId", formData.parentId)
+      if (formData.dependsOn && formData.dependsOn !== "none") formDataObj.append("dependsOn", formData.dependsOn)
+      formDataObj.append("recurrenceRule", formData.recurrenceRule)
 
       // Create or update task
       if (taskToEdit) {
@@ -212,31 +256,35 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] glass-panel text-white border-white/20 max-h-[90vh] overflow-y-auto custom-scrollbar">
         <DialogHeader>
-          <DialogTitle>{taskToEdit ? "Edit Task" : "Create New Task"}</DialogTitle>
+          <DialogTitle className="text-xl font-bold drop-shadow-md">{taskToEdit ? "Edit Task" : "Create New Task"}</DialogTitle>
+          <DialogDescription className="text-white/60">
+            {taskToEdit ? "Update your task details and requirements." : "Fill in the details below to add a new task to your list."}
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-4">
           <div className="space-y-2">
-            <Label htmlFor="title">Title</Label>
-            <Input id="title" name="title" value={formData.title} onChange={handleChange} required />
+            <Label htmlFor="title" className="text-white/80">Title</Label>
+            <Input id="title" name="title" value={formData.title} onChange={handleChange} required className="glass-input" />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor="description" className="text-white/80">Description</Label>
             <Textarea
               id="description"
               name="description"
               value={formData.description}
               onChange={handleChange}
               rows={3}
+              className="glass-input resize-none"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="dueDate">Due Date</Label>
+              <Label htmlFor="dueDate" className="text-white/80">Due Date</Label>
               <Input
                 id="dueDate"
                 name="dueDate"
@@ -244,11 +292,12 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
                 value={formData.dueDate}
                 onChange={handleChange}
                 required
+                className="glass-input" style={{ colorScheme: "dark" }}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="dueTime">Due Time</Label>
+              <Label htmlFor="dueTime" className="text-white/80">Due Time</Label>
               <Input
                 id="dueTime"
                 name="dueTime"
@@ -256,30 +305,31 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
                 value={formData.dueTime}
                 onChange={handleChange}
                 required
+                className="glass-input" style={{ colorScheme: "dark" }}
               />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
+            <Label htmlFor="category" className="text-white/80">Category</Label>
             <Select value={formData.category} onValueChange={(value) => handleSelectChange("category", value)}>
-              <SelectTrigger>
+              <SelectTrigger className="glass-input">
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="glass-card text-white border-white/20">
                 {existingCategories.map((category) => (
                   <SelectItem key={category} value={category}>
                     {category}
                   </SelectItem>
                 ))}
-                <SelectItem value="custom">+ Add Custom Category</SelectItem>
+                <SelectItem value="custom" className="text-indigo-400 font-medium">+ Add Custom Category</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           {isCustomCategory && (
-            <div className="space-y-2">
-              <Label htmlFor="customCategory">Custom Category</Label>
+            <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+              <Label htmlFor="customCategory" className="text-white/80">Custom Category</Label>
               <Input
                 id="customCategory"
                 name="customCategory"
@@ -287,45 +337,104 @@ export function TaskFormModal({ open, onOpenChange, initialDate, initialHour, ta
                 onChange={handleChange}
                 placeholder="Enter custom category"
                 required={isCustomCategory}
+                className="glass-input"
               />
             </div>
           )}
 
           <div className="space-y-2">
-            <Label>Priority</Label>
+            <Label htmlFor="sharedWith" className="text-white/80">Share with (Search users)</Label>
+            <UserMultiSelect
+              value={formData.sharedWith}
+              onChange={(val) => setFormData({ ...formData, sharedWith: val })}
+              placeholder="Search by name or email..."
+            />
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <Label className="text-white/80">Priority</Label>
             <RadioGroup
               value={formData.priority}
               onValueChange={(value) => handleSelectChange("priority", value)}
-              className="flex space-x-4"
+              className="flex space-x-6"
             >
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="low" id="low" />
-                <Label htmlFor="low" className="text-green-600">
+                <RadioGroupItem value="low" id="low-edit" className="border-emerald-400 text-emerald-400" />
+                <Label htmlFor="low-edit" className="text-emerald-300 cursor-pointer">
                   Low
                 </Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="medium" id="medium" />
-                <Label htmlFor="medium" className="text-yellow-600">
+                <RadioGroupItem value="medium" id="medium-edit" className="border-amber-400 text-amber-400" />
+                <Label htmlFor="medium-edit" className="text-amber-300 cursor-pointer">
                   Medium
                 </Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="high" id="high" />
-                <Label htmlFor="high" className="text-red-600">
+                <RadioGroupItem value="high" id="high-edit" className="border-red-400 text-red-400" />
+                <Label htmlFor="high-edit" className="text-red-300 cursor-pointer">
                   High
                 </Label>
               </div>
             </RadioGroup>
           </div>
 
-          {error && <div className="text-red-500 text-sm p-2 bg-red-50 rounded border border-red-200">{error}</div>}
+          {error && <div className="text-pink-300 text-sm p-3 bg-pink-500/10 rounded-lg border border-pink-500/20 backdrop-blur-md">{error}</div>}
+
+          <div className="space-y-2">
+            <Label className="text-white/80">Recurrence</Label>
+            <Select value={formData.recurrenceRule} onValueChange={(v) => handleSelectChange("recurrenceRule", v)}>
+              <SelectTrigger className="glass-input">
+                <SelectValue placeholder="Select frequency" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="daily">Daily</SelectItem>
+                <SelectItem value="weekly">Weekly</SelectItem>
+                <SelectItem value="monthly">Monthly</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-white/80">Parent Task (Convert to Subtask)</Label>
+              <Select value={formData.parentId} onValueChange={(v) => handleSelectChange("parentId", v)}>
+                <SelectTrigger className="glass-input">
+                  <SelectValue placeholder="Select parent" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None (Top-Level)</SelectItem>
+                  {availableTasks.filter(t => t.id !== taskToEdit?.id).map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-white/80">Dependency (Blocker)</Label>
+              <Select value={formData.dependsOn} onValueChange={(v) => handleSelectChange("dependsOn", v)}>
+                <SelectTrigger className="glass-input">
+                  <SelectValue placeholder="Select blocker" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {availableTasks.filter(t => t.id !== taskToEdit?.id).map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sharedWith" className="text-white/80">Share with (usernames, comma separated)</Label>
+            <Input id="sharedWith" name="sharedWith" value={formData.sharedWith} onChange={handleChange} placeholder="user1, user2" className="glass-input" />
+          </div>
 
           <DialogFooter className="pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold">
               {isSubmitting ? "Saving..." : taskToEdit ? "Update Task" : "Create Task"}
             </Button>
           </DialogFooter>

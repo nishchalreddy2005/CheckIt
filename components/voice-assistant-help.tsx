@@ -19,7 +19,7 @@ export function VoiceAssistantHelp() {
           <HelpCircle className="h-4 w-4" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md glass-panel border-white/20 text-white">
         <DialogHeader>
           <DialogTitle>Voice Assistant Commands</DialogTitle>
           <DialogDescription>

@@ -1,7 +1,7 @@
 import type React from "react"
 import "./globals.css"
 import { Inter } from "next/font/google"
-import { GeminiVoiceAssistant } from "@/components/gemini-voice-assistant"
+import { VoiceAssistant } from "@/components/voice-assistant"
 // Import the ClientNavigation component
 import { ClientNavigation } from "@/components/client-navigation"
 
@@ -13,9 +13,18 @@ const inter = Inter({
 })
 
 export const metadata = {
-  title: "TaskSphere",
+  title: "CheckIt",
   description: "A modern task management application",
-    generator: 'v0.dev'
+  generator: 'v0.dev',
+  manifest: '/manifest.json',
+}
+
+export const viewport = {
+  themeColor: '#4f46e5',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 }
 
 export default function RootLayout({
@@ -29,7 +38,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <ClientNavigation />
         {children}
-        <GeminiVoiceAssistant />
+        <VoiceAssistant />
       </body>
     </html>
   )

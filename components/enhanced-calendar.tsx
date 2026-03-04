@@ -29,13 +29,25 @@ import { cn } from "@/lib/utils"
 // Define the CalendarView type
 type CalendarView = "day" | "week" | "month"
 
-// Fix the taskToEvent function to match the actual Task structure
 const taskToEvent = (task: Task) => {
-  const dueDate = new Date(task.dueDate)
+  // Safe parsing for dates that might be null or Date objects
+  let dueDate: Date
+  let hasTime = false
 
-  // Use the actual time from the task if available, otherwise use a random hour
-  const hour = task.dueDate.includes("T") ? getHours(dueDate) : Math.floor(Math.random() * 9) + 8
-  const duration = Math.floor(Math.random() * 2) + 1 // 1-2 hours
+  if (task.dueDate instanceof Date) {
+    dueDate = task.dueDate
+    hasTime = task.dueDate.toISOString().includes("T") && task.dueDate.toISOString().split("T")[1] !== "00:00:00.000Z"
+  } else if (typeof task.dueDate === 'string') {
+    const dateStr = task.dueDate as string
+    dueDate = new Date(dateStr)
+    hasTime = dateStr.includes("T") && !dateStr.endsWith("T00:00:00.000Z")
+  } else {
+    dueDate = new Date()
+  }
+
+  // Use the actual time if available, otherwise default to 9 AM (not random)
+  const hour = hasTime ? getHours(dueDate) : 9
+  const duration = 1 // 1 hour default duration
 
   // Set start and end times
   const start = setHours(setMinutes(dueDate, 0), hour)
@@ -60,8 +72,8 @@ const taskToEvent = (task: Task) => {
     title: task.title,
     start,
     end,
-    color: colorMap[task.category as keyof typeof colorMap] || "bg-purple-500",
-    priorityIndicator: priorityMap[task.priority] || "",
+    color: colorMap[(task.category || "General") as keyof typeof colorMap] || "bg-purple-500",
+    priorityIndicator: priorityMap[task.priority || "medium"] || "",
     completed: task.completed,
     description: task.description,
     category: task.category,

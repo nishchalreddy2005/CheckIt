@@ -15,6 +15,7 @@ import { BarChart } from "@/components/bar-chart"
 import { RedisStatus } from "@/components/redis-status"
 import { SimpleTaskForm } from "@/components/simple-task-form"
 import { DirectTaskButton } from "@/components/direct-task-button"
+import type { Task } from "@/lib/types"
 
 export default async function DashboardPage() {
   // Get the current user
@@ -33,7 +34,7 @@ export default async function DashboardPage() {
   }
 
   // Fetch tasks from Redis for the current user
-  let tasks = []
+  let tasks: Task[] = []
   let stats = { completed: 0, total: 0, categories: {} }
 
   try {

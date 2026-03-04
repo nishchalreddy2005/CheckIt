@@ -86,13 +86,13 @@ export function EnhancedTaskCard({ task, onToggleCompletion, onDelete, onEdit }:
             <div className="flex items-center justify-between">
               <span className={`font-medium ${task.completed ? "line-through text-gray-500" : ""}`}>{task.title}</span>
               <div className="flex items-center gap-2">
-                <Badge className={getPriorityColor(task.priority)}>{task.priority}</Badge>
+                <Badge className={getPriorityColor(task.priority || "low")}>{task.priority || "low"}</Badge>
                 <Badge variant="outline">{task.category}</Badge>
               </div>
             </div>
             <p className="text-sm text-gray-500">{task.description}</p>
             <div className="flex items-center justify-between pt-2">
-              <p className="text-xs text-gray-500">Due: {new Date(task.dueDate).toLocaleDateString()}</p>
+              <p className="text-xs text-gray-500">Due: {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "None"}</p>
               <div className="flex gap-2">
                 {!task.completed ? (
                   <Button
@@ -160,7 +160,7 @@ export function EnhancedTaskCard({ task, onToggleCompletion, onDelete, onEdit }:
             <AlertDialogAction
               onClick={() => {
                 setShowConfirmation(false)
-                onToggleCompletion(task.id, true)
+                onToggleCompletion(task.id)
               }}
               className="bg-green-600 hover:bg-green-700"
             >

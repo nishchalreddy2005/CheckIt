@@ -11,6 +11,15 @@ try {
   }
 }
 
+import withPWAInit from "@ducanh2912/next-pwa";
+
+const withPWA = withPWAInit({
+  dest: "public",
+  disable: process.env.NODE_ENV === "development",
+  register: true,
+  skipWaiting: true,
+});
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -22,10 +31,14 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  serverExternalPackages: ["natural"],
   experimental: {
     webpackBuildWorker: true,
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
+    serverActions: {
+      bodySizeLimit: "10mb",
+    },
   },
 }
 
@@ -48,4 +61,4 @@ if (userConfig) {
   }
 }
 
-export default nextConfig
+export default withPWA(nextConfig)

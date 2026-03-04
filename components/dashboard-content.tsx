@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { TaskList } from "@/components/task-list"
+import { KanbanBoard } from "@/components/kanban-board"
 import { TaskSearchFilter } from "@/components/task-search-filter"
 import { Button } from "@/components/ui/button"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, LayoutList, KanbanSquare } from "lucide-react"
 import { useRouter } from "next/navigation"
 import type { Task } from "@/lib/types"
 
@@ -16,6 +17,7 @@ interface DashboardContentProps {
 
 export function DashboardContent({ tasks: initialTasks, userId, categories }: DashboardContentProps) {
   const router = useRouter()
+  const [viewMode, setViewMode] = useState<"list" | "board">("list")
   const [filter, setFilter] = useState("all")
   const [searchFilters, setSearchFilters] = useState({
     searchTerm: "",
@@ -36,7 +38,7 @@ export function DashboardContent({ tasks: initialTasks, userId, categories }: Da
       const searchLower = searchFilters.searchTerm.toLowerCase()
       filtered = filtered.filter(
         (task) =>
-          task.title.toLowerCase().includes(searchLower) || task.description.toLowerCase().includes(searchLower),
+          task.title.toLowerCase().includes(searchLower) || (task.description?.toLowerCase().includes(searchLower) ?? false),
       )
     }
 
@@ -65,7 +67,7 @@ export function DashboardContent({ tasks: initialTasks, userId, categories }: Da
       fromDate.setHours(0, 0, 0, 0)
 
       filtered = filtered.filter((task) => {
-        const taskDate = new Date(task.dueDate)
+        const taskDate = new Date(task.dueDate || new Date())
         return taskDate >= fromDate
       })
 
@@ -74,7 +76,7 @@ export function DashboardContent({ tasks: initialTasks, userId, categories }: Da
         toDate.setHours(23, 59, 59, 999)
 
         filtered = filtered.filter((task) => {
-          const taskDate = new Date(task.dueDate)
+          const taskDate = new Date(task.dueDate || new Date())
           return taskDate <= toDate
         })
       }
@@ -83,19 +85,11 @@ export function DashboardContent({ tasks: initialTasks, userId, categories }: Da
     setFilteredTasks(filtered)
   }, [initialTasks, searchFilters, refreshKey])
 
-  // Add this after the existing useEffect for filtering tasks
-  useEffect(() => {
-    // Set up an interval to refresh the tasks every 5 seconds
-    const refreshInterval = setInterval(() => {
-      router.refresh()
-    }, 5000)
-
-    // Clean up the interval when the component unmounts
-    return () => clearInterval(refreshInterval)
-  }, [router])
+  // Tasks auto-update via revalidatePath() in server actions (create/edit/delete/toggle)
+  // No polling needed — it was causing full page remounts that destroyed drag positions
 
   // Handle search and filtering
-  const handleSearch = (filters) => {
+  const handleSearch = (filters: any) => {
     setSearchFilters(filters)
   }
 
@@ -139,15 +133,43 @@ export function DashboardContent({ tasks: initialTasks, userId, categories }: Da
             Completed
           </Button>
         </div>
-        <Button onClick={handleRefresh} variant="outline" size="sm" className="flex items-center gap-1">
-          <RefreshCw className="h-4 w-4" />
-          <span>Refresh</span>
-        </Button>
+
+        <div className="flex space-x-2">
+          <div className="flex bg-black/40 border border-white/10 rounded-md p-1 backdrop-blur-md">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setViewMode("list")}
+              className={`h-7 px-2 ${viewMode === "list" ? "bg-white/10 text-white shadow-sm" : "text-white/50 hover:text-white"}`}
+            >
+              <LayoutList className="h-4 w-4 mr-1" />
+              <span className="text-xs">List</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setViewMode("board")}
+              className={`h-7 px-2 ${viewMode === "board" ? "bg-white/10 text-white shadow-sm" : "text-white/50 hover:text-white"}`}
+            >
+              <KanbanSquare className="h-4 w-4 mr-1" />
+              <span className="text-xs">Board</span>
+            </Button>
+          </div>
+
+          <Button onClick={handleRefresh} variant="outline" size="sm" className="flex items-center gap-1 h-9">
+            <RefreshCw className="h-4 w-4" />
+            <span>Refresh</span>
+          </Button>
+        </div>
       </div>
 
       <TaskSearchFilter onSearch={handleSearch} categories={categories} />
 
-      <TaskList initialTasks={filteredTasks} filter={filter} userId={userId} searchFilters={searchFilters} />
+      {viewMode === "list" ? (
+        <TaskList initialTasks={filteredTasks} filter={filter} userId={userId} searchFilters={searchFilters} />
+      ) : (
+        <KanbanBoard tasks={filteredTasks} />
+      )}
     </div>
   )
 }

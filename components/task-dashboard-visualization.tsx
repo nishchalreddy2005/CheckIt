@@ -55,10 +55,11 @@ export function TaskDashboardVisualization({ tasks, stats }: TaskDashboardVisual
 
     return tasks
       .filter((task) => {
+        if (!task.dueDate) return false
         const dueDate = new Date(task.dueDate)
         return dueDate >= today && dueDate <= nextWeek && !task.completed
       })
-      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+      .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
   }, [tasks])
 
   // Get overdue tasks
@@ -68,10 +69,11 @@ export function TaskDashboardVisualization({ tasks, stats }: TaskDashboardVisual
 
     return tasks
       .filter((task) => {
+        if (!task.dueDate) return false
         const dueDate = new Date(task.dueDate)
         return dueDate < today && !task.completed
       })
-      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+      .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
   }, [tasks])
 
   // Format date for display
@@ -282,17 +284,16 @@ export function TaskDashboardVisualization({ tasks, stats }: TaskDashboardVisual
                           <div key={task.id} className="flex items-center justify-between border-b pb-2">
                             <div className="flex items-center">
                               <div
-                                className={`h-2 w-2 rounded-full mr-3 ${
-                                  task.priority === "high"
-                                    ? "bg-red-500"
-                                    : task.priority === "medium"
-                                      ? "bg-amber-500"
-                                      : "bg-green-500"
-                                }`}
+                                className={`h-2 w-2 rounded-full mr-3 ${task.priority === "high"
+                                  ? "bg-red-500"
+                                  : task.priority === "medium"
+                                    ? "bg-amber-500"
+                                    : "bg-green-500"
+                                  }`}
                               ></div>
                               <span className="font-medium">{task.title}</span>
                             </div>
-                            <div className="text-sm text-muted-foreground">{formatDate(task.dueDate)}</div>
+                            <div className="text-sm text-muted-foreground">{formatDate(task.dueDate ? String(task.dueDate) : "")}</div>
                           </div>
                         ))}
                         {upcomingTasks.length > 5 && (
@@ -401,15 +402,14 @@ export function TaskDashboardVisualization({ tasks, stats }: TaskDashboardVisual
                               </div>
                               <div className="h-4 w-full rounded-full bg-gray-100 overflow-hidden">
                                 <div
-                                  className={`h-full ${
-                                    completionRate >= 75
-                                      ? "bg-green-500"
-                                      : completionRate >= 50
-                                        ? "bg-amber-500"
-                                        : completionRate >= 25
-                                          ? "bg-orange-500"
-                                          : "bg-red-500"
-                                  }`}
+                                  className={`h-full ${completionRate >= 75
+                                    ? "bg-green-500"
+                                    : completionRate >= 50
+                                      ? "bg-amber-500"
+                                      : completionRate >= 25
+                                        ? "bg-orange-500"
+                                        : "bg-red-500"
+                                    }`}
                                   style={{ width: `${completionRate}%` }}
                                 />
                               </div>
@@ -769,6 +769,7 @@ export function TaskDashboardVisualization({ tasks, stats }: TaskDashboardVisual
                         const tasksByDate = dates.map((date) => {
                           const dateStr = formatDateForComparison(date)
                           const tasksOnDate = tasks.filter((task) => {
+                            if (!task.dueDate) return false
                             // Normalize the task due date format for comparison
                             const taskDueDate = new Date(task.dueDate)
                             const taskDueDateStr = formatDateForComparison(taskDueDate)
@@ -831,13 +832,12 @@ export function TaskDashboardVisualization({ tasks, stats }: TaskDashboardVisual
                                   {day.tasks.slice(0, 2).map((task) => (
                                     <div key={task.id} className="flex items-center text-xs">
                                       <div
-                                        className={`h-2 w-2 rounded-full mr-2 ${
-                                          task.priority === "high"
-                                            ? "bg-red-500"
-                                            : task.priority === "medium"
-                                              ? "bg-amber-500"
-                                              : "bg-green-500"
-                                        }`}
+                                        className={`h-2 w-2 rounded-full mr-2 ${task.priority === "high"
+                                          ? "bg-red-500"
+                                          : task.priority === "medium"
+                                            ? "bg-amber-500"
+                                            : "bg-green-500"
+                                          }`}
                                       ></div>
                                       <span className={task.completed ? "line-through text-muted-foreground" : ""}>
                                         {task.title}
@@ -876,17 +876,16 @@ export function TaskDashboardVisualization({ tasks, stats }: TaskDashboardVisual
                             <div key={task.id} className="flex items-center justify-between border-b pb-2">
                               <div className="flex items-center">
                                 <div
-                                  className={`h-2 w-2 rounded-full mr-3 ${
-                                    task.priority === "high"
-                                      ? "bg-red-500"
-                                      : task.priority === "medium"
-                                        ? "bg-amber-500"
-                                        : "bg-green-500"
-                                  }`}
+                                  className={`h-2 w-2 rounded-full mr-3 ${task.priority === "high"
+                                    ? "bg-red-500"
+                                    : task.priority === "medium"
+                                      ? "bg-amber-500"
+                                      : "bg-green-500"
+                                    }`}
                                 ></div>
                                 <span className="font-medium">{task.title}</span>
                               </div>
-                              <div className="text-sm text-red-500">{new Date(task.dueDate).toLocaleDateString()}</div>
+                              <div className="text-sm text-red-500">{new Date(task.dueDate!).toLocaleDateString()}</div>
                             </div>
                           ))}
                         </div>

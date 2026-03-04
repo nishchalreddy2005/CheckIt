@@ -49,7 +49,7 @@ export function ProfilePictureSection({ user }: { user: User }) {
       } else {
         setError(result.message || "Failed to upload image. Please try again.")
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Profile picture upload error:", err)
       setError(`Failed to upload image: ${err.message || "Unknown error"}`)
     } finally {

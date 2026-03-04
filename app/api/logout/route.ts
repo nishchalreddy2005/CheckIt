@@ -5,10 +5,11 @@ import { invalidateSession } from "@/lib/session"
 export async function GET() {
   try {
     // Get the session ID from cookies
-    const sessionId = cookies().get("sessionId")?.value
+    const cookieStore = await cookies()
+    const sessionId = cookieStore.get("sessionId")?.value
 
     // Delete the session cookie immediately
-    cookies().delete("sessionId")
+    cookieStore.delete("sessionId")
 
     // If there was a session ID, invalidate it in the background
     if (sessionId) {

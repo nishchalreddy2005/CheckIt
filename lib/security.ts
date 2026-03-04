@@ -1,10 +1,12 @@
-import bcrypt from "bcryptjs"
-import { redis } from "./redis"
-import speakeasy from "speakeasy"
+// No bcrypt here
+import { db } from "./db"
+import { users, sessions } from "./db/schema"
+import { eq } from "drizzle-orm"
 import QRCode from "qrcode"
-import { RateLimiter } from "limiter"
 import type { User } from "./types"
 import { SignJWT, jwtVerify } from "jose"
+// NOTE: mailer is imported dynamically inside email functions
+// to avoid bundling nodemailer into Edge middleware runtime
 
 // Environment variables
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production"
@@ -15,14 +17,7 @@ const getSecretKey = () => {
   return new TextEncoder().encode(JWT_SECRET)
 }
 
-// Password hashing
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12) // 12 rounds is a good balance between security and performance
-}
-
-export async function verifyPassword(password: string, hashedPassword: string): Promise<boolean> {
-  return bcrypt.compare(password, hashedPassword)
-}
+// Password hashing moved to security-server.ts
 
 // JWT token generation and verification using jose instead of jsonwebtoken
 export async function generateToken(userId: string, expiresIn = "1h"): Promise<string> {
@@ -52,33 +47,43 @@ export async function verifyToken(token: string): Promise<{ userId: string } | n
   }
 }
 
-// Email verification with EmailJS
+// Email verification — actually sends the email via SMTP
 export async function sendVerificationEmail(user: User, newEmail: string): Promise<boolean> {
   try {
-    // Generate a verification token
     const token = await generateToken(user.id, "24h")
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
 
-    // Store the token and new email in Redis
-    await redis.hset(`email-verification:${token}`, {
-      userId: user.id,
-      newEmail,
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+    await db.update(users)
+      .set({
+        verificationToken: token,
+        verificationTokenExpiresAt: expiresAt,
+        pendingNewEmail: newEmail
+      })
+      .where(eq(users.id, user.id))
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+    const verificationLink = `${appUrl}/verify-email?token=${token}`
+
+    const { sendMail, emailTemplate } = await import("./mailer")
+    const html = emailTemplate(
+      "Verify Your Email Address",
+      `<p style="color:#e2e8f0;">Hi <strong>${user.name}</strong>,</p>
+       <p>You've requested to change your email address to <strong style="color:#818cf8;">${newEmail}</strong>.</p>
+       <p>Please click the button below to verify this new email address. This link will expire in <strong>24 hours</strong>.</p>`,
+      "Verify Email",
+      verificationLink
+    )
+
+    const sent = await sendMail({
+      to: newEmail,
+      subject: "Verify your email — CheckIt",
+      html,
     })
 
-    // Create a verification link
-    const verificationLink = `${process.env.NEXT_PUBLIC_APP_URL}/verify-email?token=${token}`
-
-    // The actual email sending will be handled by the client-side EmailJS integration
-    // We'll store the verification data for the frontend to access
-    await redis.set(
-      `pending-verification:${user.id}`,
-      JSON.stringify({
-        email: newEmail,
-        verificationLink,
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      }),
-      { ex: 86400 },
-    ) // 24 hours
+    if (!sent) {
+      console.error("Failed to send verification email")
+      return false
+    }
 
     return true
   } catch (error) {
@@ -87,55 +92,83 @@ export async function sendVerificationEmail(user: User, newEmail: string): Promi
   }
 }
 
+// Send password reset email
+export async function sendPasswordResetEmail(email: string): Promise<boolean> {
+  try {
+    const [user] = await db.select().from(users).where(eq(users.email, email))
+    if (!user) {
+      // Return true anyway to not leak whether an email exists
+      return true
+    }
+
+    const token = await generateToken(user.id, "1h")
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+
+    await db.update(users)
+      .set({
+        verificationToken: token,
+        verificationTokenExpiresAt: expiresAt,
+      })
+      .where(eq(users.id, user.id))
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+    const resetLink = `${appUrl}/reset-password?token=${token}`
+
+    const { sendMail, emailTemplate } = await import("./mailer")
+    const html = emailTemplate(
+      "Reset Your Password",
+      `<p style="color:#e2e8f0;">Hi <strong>${user.name}</strong>,</p>
+       <p>We received a request to reset your password for your CheckIt account.</p>
+       <p>Click the button below to set a new password. This link will expire in <strong>1 hour</strong>.</p>
+       <p style="color:#64748b;font-size:13px;">If you didn't request a password reset, you can safely ignore this email.</p>`,
+      "Reset Password",
+      resetLink
+    )
+
+    await sendMail({
+      to: email,
+      subject: "Reset your password — CheckIt",
+      html,
+    })
+
+    return true
+  } catch (error) {
+    console.error("Failed to send password reset email:", error)
+    return false
+  }
+}
+
 export async function verifyEmail(token: string): Promise<{ success: boolean; message: string; userId?: string }> {
   try {
-    // Verify the token
     const decoded = await verifyToken(token)
     if (!decoded) {
       return { success: false, message: "Invalid verification token" }
     }
 
-    // Get verification data from Redis
-    const verification = await redis.hgetall(`email-verification:${token}`)
+    const [user] = await db.select().from(users).where(eq(users.verificationToken, token))
 
-    if (!verification || !verification.userId || !verification.newEmail) {
+    if (!user || !user.pendingNewEmail || !user.verificationTokenExpiresAt) {
       return { success: false, message: "Invalid verification token" }
     }
 
-    // Check if token is expired
-    if (Number.parseInt(verification.expiresAt as string, 10) < Date.now()) {
-      await redis.del(`email-verification:${token}`)
+    if (user.verificationTokenExpiresAt.getTime() < Date.now()) {
+      await db.update(users).set({ verificationToken: null, verificationTokenExpiresAt: null, pendingNewEmail: null }).where(eq(users.id, user.id))
       return { success: false, message: "Verification token has expired" }
     }
 
-    // Get user
-    const user = await redis.hgetall(`user:${verification.userId}`)
-    if (!user) {
-      return { success: false, message: "User not found" }
-    }
-
-    // Update email
-    const oldEmail = user.email
-
-    // Update user data
-    await redis.hset(`user:${verification.userId}`, {
-      ...user,
-      email: verification.newEmail,
+    await db.update(users).set({
+      email: user.pendingNewEmail,
       emailVerified: true,
-      updatedAt: Date.now(),
-    })
-
-    // Update email mapping
-    await redis.del(`email:${oldEmail}`)
-    await redis.set(`email:${verification.newEmail}`, verification.userId)
-
-    // Delete verification token
-    await redis.del(`email-verification:${token}`)
+      updatedAt: new Date(),
+      verificationToken: null,
+      verificationTokenExpiresAt: null,
+      pendingNewEmail: null
+    }).where(eq(users.id, user.id))
 
     return {
       success: true,
       message: "Email verified successfully",
-      userId: verification.userId as string,
+      userId: user.id,
     }
   } catch (error) {
     console.error("Failed to verify email:", error)
@@ -143,122 +176,92 @@ export async function verifyEmail(token: string): Promise<{ success: boolean; me
   }
 }
 
-// Two-factor authentication
-export function generateTwoFactorSecret(
-  userId: string,
-): Promise<{ secret: string; otpAuthUrl: string; qrCodeUrl: string }> {
-  return new Promise((resolve, reject) => {
-    try {
-      // Generate a secret
-      const secret = speakeasy.generateSecret({
-        name: `CheckIt:${userId}`,
-      })
+// Removed Two-factor authentication (Moved to security-server.ts for Node.js runtime)
 
-      // Generate QR code
-      QRCode.toDataURL(secret.otpauth_url || "", (err, qrCodeUrl) => {
-        if (err) {
-          reject(err)
-          return
-        }
-
-        resolve({
-          secret: secret.base32,
-          otpAuthUrl: secret.otpauth_url || "",
-          qrCodeUrl,
-        })
-      })
-    } catch (error) {
-      reject(error)
-    }
-  })
-}
-
-export function verifyTwoFactorToken(secret: string, token: string): boolean {
-  return speakeasy.totp.verify({
-    secret,
-    encoding: "base32",
-    token,
-  })
-}
-
-// Session management
-export async function createSession(userId: string): Promise<string> {
+export async function createSession(userId: string, userAgent?: string, ipAddress?: string): Promise<string> {
   try {
-    console.log(`Creating session for user: ${userId}`)
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`
 
-    const sessionData = {
+    await db.insert(sessions).values({
+      id: sessionId,
       userId,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + SESSION_TIMEOUT * 1000,
-    }
-
-    console.log(`Session data:`, sessionData)
-
-    // Store session data
-    await redis.hset(`session:${sessionId}`, sessionData)
-
-    // Add session to user's sessions
-    await redis.sadd(`user:${userId}:sessions`, sessionId)
-    console.log(`Session added to user's sessions`)
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + SESSION_TIMEOUT * 1000),
+      userAgent: userAgent || null,
+      ipAddress: ipAddress || null
+    })
 
     return sessionId
   } catch (error) {
     console.error("Failed to create session:", error)
-    // Instead of throwing, return a fallback session ID
-    // This ensures the function always returns a string
     return `fallback-session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`
   }
 }
 
-export async function validateSession(sessionId: string): Promise<{ valid: boolean; userId?: string }> {
+export async function validateSession(sessionId: string): Promise<{ valid: boolean; userId?: string; isAdmin?: boolean; isSuperadmin?: boolean }> {
   try {
-    console.log(`Validating session: ${sessionId}`)
-
     if (!sessionId || typeof sessionId !== "string" || sessionId.trim() === "") {
-      console.log("Invalid session ID format")
       return { valid: false }
     }
 
-    const session = await redis.hgetall(`session:${sessionId}`)
+    const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
 
-    if (!session || !session.userId || Object.keys(session).length === 0) {
-      console.log("Session not found or missing userId")
+    if (!session || !session.userId) {
       return { valid: false }
     }
 
-    console.log(`Session found for user: ${session.userId}`)
+    const now = Date.now()
+    const expiresAt = session.expiresAt.getTime()
 
-    // Check if session is expired
-    const expiresAt = Number.parseInt(session.expiresAt as string, 10)
-    if (isNaN(expiresAt) || expiresAt < Date.now()) {
-      console.log(`Session expired at: ${new Date(expiresAt).toLocaleTimeString()}`)
+    if (isNaN(expiresAt) || expiresAt < now) {
       try {
-        await redis.del(`session:${sessionId}`)
-        // Check if session.userId is a string before using it
-        if (session.userId && typeof session.userId === "string") {
-          await redis.srem(`user:${session.userId}:sessions`, sessionId)
-        }
+        await db.delete(sessions).where(eq(sessions.id, sessionId))
       } catch (cleanupError) {
         console.error("Error cleaning up expired session:", cleanupError)
-        // Continue even if cleanup fails
       }
       return { valid: false }
     }
 
-    // Extend session
+    // Identify user roles sequentially instead of using leftJoin to prevent Edge runtime mapping bugs
+    let isAdmin = false
+    let isSuperadmin = false
     try {
-      await redis.hset(`session:${sessionId}`, {
-        ...session,
-        expiresAt: Date.now() + SESSION_TIMEOUT * 1000,
-      })
-      console.log("Session extended")
-    } catch (updateError) {
-      console.error("Error extending session:", updateError)
-      // Continue even if extension fails
+      const [user] = await db.select({
+        isAdmin: users.isAdmin,
+        isSuperadmin: users.isSuperadmin
+      }).from(users).where(eq(users.id, session.userId))
+
+      console.log("DB select result in validateSession:", user)
+
+      if (user) {
+        isAdmin = user.isAdmin ?? false
+        isSuperadmin = user.isSuperadmin ?? false
+      }
+    } catch (e) {
+      console.error("Failed to fetch user roles in validateSession", e)
     }
 
-    return { valid: true, userId: session.userId as string }
+    // Only update DB if session has less than half its life left
+    // This prevents writing to DB on every single request
+    const timeUntilExpiry = expiresAt - now
+    const halfTimeout = (SESSION_TIMEOUT / 2) * 1000
+
+    if (timeUntilExpiry < halfTimeout) {
+      try {
+        await db.update(sessions)
+          .set({ expiresAt: new Date(now + SESSION_TIMEOUT * 1000) })
+          .where(eq(sessions.id, sessionId))
+      } catch (updateError) {
+        console.error("Error extending session:", updateError)
+      }
+    }
+
+    return {
+      valid: true,
+      userId: session.userId,
+      isAdmin,
+      isSuperadmin
+    }
   } catch (error) {
     console.error("Failed to validate session:", error)
     return { valid: false }
@@ -267,22 +270,7 @@ export async function validateSession(sessionId: string): Promise<{ valid: boole
 
 export async function invalidateSession(sessionId: string): Promise<boolean> {
   try {
-    console.log(`Invalidating session: ${sessionId}`)
-
-    // Get the session data first
-    const session = await redis.hgetall(`session:${sessionId}`)
-    console.log(`Session data:`, session)
-
-    // If we have a userId, remove the session from the user's sessions set
-    if (session && session.userId) {
-      console.log(`Removing session from user's sessions: ${session.userId}`)
-      await redis.srem(`user:${session.userId}:sessions`, sessionId)
-    }
-
-    // Delete the session data
-    console.log(`Deleting session data`)
-    await redis.del(`session:${sessionId}`)
-
+    await db.delete(sessions).where(eq(sessions.id, sessionId))
     return true
   } catch (error) {
     console.error("Failed to invalidate session:", error)
@@ -292,14 +280,7 @@ export async function invalidateSession(sessionId: string): Promise<boolean> {
 
 export async function invalidateAllUserSessions(userId: string): Promise<boolean> {
   try {
-    const sessionIds = await redis.smembers(`user:${userId}:sessions`)
-
-    for (const sessionId of sessionIds) {
-      await redis.del(`session:${sessionId}`)
-    }
-
-    await redis.del(`user:${userId}:sessions`)
-
+    await db.delete(sessions).where(eq(sessions.userId, userId))
     return true
   } catch (error) {
     console.error("Failed to invalidate all user sessions:", error)
@@ -307,38 +288,11 @@ export async function invalidateAllUserSessions(userId: string): Promise<boolean
   }
 }
 
-// Rate limiting
-const rateLimiters: Record<string, RateLimiter> = {
-  login: new RateLimiter({ tokensPerInterval: 5, interval: "minute" }),
-  passwordReset: new RateLimiter({ tokensPerInterval: 3, interval: "hour" }),
-  profileUpdate: new RateLimiter({ tokensPerInterval: 10, interval: "hour" }),
-  emailVerification: new RateLimiter({ tokensPerInterval: 3, interval: "hour" }),
-}
-
+// Rate limiting (To be implemented with Vercel KV / Redis for Serverless compatibility)
 export async function checkRateLimit(
   key: string,
   action: "login" | "passwordReset" | "profileUpdate" | "emailVerification",
 ): Promise<{ success: boolean; message?: string }> {
-  try {
-    const limiter = rateLimiters[action]
-
-    if (!limiter) {
-      return { success: true }
-    }
-
-    // Check if user has tokens left
-    const hasTokens = await limiter.tryRemoveTokens(1)
-
-    if (!hasTokens) {
-      return {
-        success: false,
-        message: `Too many ${action} attempts. Please try again later.`,
-      }
-    }
-
-    return { success: true }
-  } catch (error) {
-    console.error(`Rate limit check failed for ${key}:${action}:`, error)
-    return { success: true } // Fail open to prevent blocking legitimate users
-  }
+  // Currently disabled in Edge runtime. In memory limiters fail across distributed serverless nodes.
+  return { success: true }
 }

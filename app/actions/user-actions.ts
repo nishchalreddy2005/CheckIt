@@ -1,877 +1,450 @@
 "use server"
 
-import { redis, generateId } from "@/lib/redis"
+import { db } from "@/lib/db"
+import { users, sessions, tasks } from "@/lib/db/schema"
+import { eq, or, ilike } from "drizzle-orm"
 import type { User } from "@/lib/types"
 import { cookies } from "next/headers"
 import { revalidatePath } from "next/cache"
 import {
-  hashPassword,
-  verifyPassword,
-  createSession,
   invalidateSession,
   checkRateLimit,
   validateSession,
-  verifyTwoFactorToken,
+  createSession,
 } from "@/lib/security"
+import { verifyTwoFactorToken, hashPassword, verifyPassword } from "@/lib/security-server"
 import { headers } from "next/headers"
-import { initSuperadmin } from "@/lib/init-superadmin" // Fixed import
+import crypto from "crypto"
+import { sendOtpEmail } from "@/lib/mailer"
 
-// Initialize superadmin when this file is first loaded
-initSuperadmin().catch((error) => {
-  console.error("Failed to initialize superadmin:", error)
-})
-
-// Create a new user
-export async function createUser(formData: FormData): Promise<{ success: boolean; message: string; userId?: string }> {
+export async function createUser(formData: FormData): Promise<{ success: boolean; message: string; userId?: string; requireOtpVerification?: boolean; email?: string }> {
   try {
-    // Test Redis connection first
-    try {
-      await redis.set("connection-test", "ok")
-      const testResult = await redis.get("connection-test")
-      if (testResult !== "ok") {
-        console.error("Redis connection test failed: unexpected result", testResult)
-        return { success: false, message: "Database connection error. Please try again later." }
-      }
-    } catch (redisError) {
-      console.error("Redis connection test failed:", redisError)
-      return { success: false, message: "Database connection error. Please try again later." }
-    }
-
     const email = formData.get("email") as string
     const firstName = formData.get("first-name") as string
     const lastName = formData.get("last-name") as string
+    const username = formData.get("username") as string
     const password = formData.get("password") as string
     const confirmPassword = formData.get("confirm-password") as string
     const name = `${firstName} ${lastName}`
 
-    console.log("Creating user with email:", email)
-
-    // Validate input
-    if (!email || !firstName || !lastName || !password) {
+    if (!email || !firstName || !lastName || !username || !password) {
       return { success: false, message: "Missing required fields" }
     }
 
-    // Check if passwords match
     if (password !== confirmPassword) {
       return { success: false, message: "Passwords do not match" }
     }
 
-    // Check if user with this email already exists
-    const existingUserId = await redis.get(`email:${email}`)
-    if (existingUserId) {
-      console.log("User already exists with email:", email)
+    const [existing] = await db.select().from(users).where(eq(users.email, email))
+    if (existing) {
       return { success: false, message: "Email already in use" }
     }
 
-    const id = generateId()
-    const now = Date.now()
+    const [existingUsername] = await db.select().from(users).where(eq(users.username, username))
+    if (existingUsername) {
+      return { success: false, message: "Username already taken" }
+    }
 
-    // Hash the password
+    const id = crypto.randomUUID()
     const hashedPassword = await hashPassword(password)
 
-    const user: User = {
+    // Check if user requested 2FA setup at registration
+    const enable2fa = formData.get("enable-2fa") === "on"
+
+    // Generate a 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+
+    await db.insert(users).values({
       id,
       email,
+      username,
       name,
       password: hashedPassword,
-      createdAt: now,
-      emailVerified: false, // Require email verification
-      twoFactorEnabled: false,
+      createdAt: new Date(),
+      emailVerified: false,
+      twoFactorEnabled: enable2fa,
       failedLoginAttempts: 0,
-    }
+      otpCode: otp,
+      otpExpiresAt: otpExpiresAt,
+    })
 
-    console.log("Storing user data for ID:", id)
+    // Send the OTP via email
+    await sendOtpEmail(email, otp, "Account Registration")
 
-    // Store user data
-    await redis.hset(`user:${id}`, user)
-
-    // Create email to user ID mapping
-    await redis.set(`email:${email}`, id)
-
-    // Create a session
-    let sessionId
-    try {
-      sessionId = await createSession(id)
-    } catch (sessionError) {
-      console.error("Session creation error:", sessionError)
-      // Continue even if session creation fails - we'll handle this on the client side
-      sessionId = `fallback-session-${Date.now()}`
-    }
-
-    // Set a cookie with the session ID
-    try {
-      cookies().set("sessionId", sessionId, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 60 * 60 * 24 * 7, // 1 week
-        path: "/",
-        sameSite: "lax", // Changed from strict to lax for better cross-site experience
-      })
-    } catch (cookieError) {
-      console.error("Cookie setting error:", cookieError)
-      // Continue even if cookie setting fails
-    }
-
-    console.log("User created successfully:", id)
-
-    try {
-      revalidatePath("/dashboard")
-    } catch (revalidateError) {
-      console.error("Path revalidation error:", revalidateError)
-      // Continue even if revalidation fails
-    }
-
-    return { success: true, message: "User created successfully", userId: id }
+    // We do NOT create the session yet. We tell the client to switch to OTP verification state.
+    return { success: true, message: "OTP sent. Please verify your email.", userId: id, requireOtpVerification: true, email: email }
   } catch (error) {
     console.error("Failed to create user:", error)
     return { success: false, message: "Registration failed. Please try again later." }
   }
 }
 
-// Get user by ID
+export async function verifyRegistrationOtp(userId: string, otp: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const [user] = await db.select().from(users).where(eq(users.id, userId))
+    if (!user) return { success: false, message: "User not found" }
+
+    if (!user.otpCode || user.otpCode !== otp) {
+      return { success: false, message: "Invalid verification code" }
+    }
+
+    if (!user.otpExpiresAt || new Date() > new Date(user.otpExpiresAt)) {
+      return { success: false, message: "Verification code expired" }
+    }
+
+    // Mark as verified and clear OTP
+    await db.update(users).set({
+      emailVerified: true,
+      otpCode: null,
+      otpExpiresAt: null
+    }).where(eq(users.id, userId))
+
+    // Create session now
+    let sessionId
+    try {
+      const reqHeaders = await headers()
+      const userAgent = reqHeaders.get("user-agent") || undefined
+      const ipAddress = reqHeaders.get("x-forwarded-for") || undefined
+      sessionId = await createSession(userId, userAgent, ipAddress)
+    } catch (sessionError) {
+      sessionId = `fallback-session-${Date.now()}`
+    }
+
+    try {
+      (await cookies()).set("sessionId", sessionId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24 * 7,
+        path: "/",
+        sameSite: "lax",
+      })
+    } catch (cookieError) { }
+
+    try {
+      revalidatePath("/dashboard")
+    } catch (revalidateError) { }
+
+    return { success: true, message: "Email verified successfully" }
+  } catch (error) {
+    console.error("Failed to verify OTP:", error)
+    return { success: false, message: "Verification failed. Please try again." }
+  }
+}
+
 export async function getUserById(id: string): Promise<User | null> {
   try {
-    const user = await redis.hgetall(`user:${id}`)
-    return Object.keys(user).length > 0 ? (user as User) : null
+    const [user] = await db.select().from(users).where(eq(users.id, id))
+    return user ? (user as User) : null
   } catch (error) {
-    console.error("Failed to get user:", error)
     return null
   }
 }
 
-// Get user by email
 export async function getUserByEmail(email: string): Promise<User | null> {
   try {
-    const userId = await redis.get(`email:${email}`)
-    if (!userId) return null
-
-    return getUserById(userId as string)
+    const [user] = await db.select().from(users).where(eq(users.email, email))
+    return user ? (user as User) : null
   } catch (error) {
-    console.error("Failed to get user by email:", error)
     return null
   }
 }
 
-// Get current user from session
 export async function getCurrentUser() {
   try {
-    const sessionId = cookies().get("sessionId")?.value
-    if (!sessionId) {
-      console.log("No session ID found in cookies")
-      return null
-    }
+    const sessionId = (await cookies()).get("sessionId")?.value
+    if (!sessionId) return null
 
-    console.log(`Validating session: ${sessionId}`)
-    // Validate session
     const { valid, userId } = await validateSession(sessionId)
-
     if (!valid || !userId) {
-      console.log("Invalid session, clearing cookie")
-      cookies().delete("sessionId")
+      (await cookies()).delete("sessionId")
       return null
     }
 
-    console.log(`Session valid, getting user: ${userId}`)
-
-    // Check if this is a superadmin ID
-    if (userId.startsWith("superadmin-")) {
-      const superadminId = userId
-      const superadminData = await redis.hgetall(`superadmin:${superadminId}`)
-
-      if (!superadminData || Object.keys(superadminData).length === 0) {
-        console.log("Superadmin not found for valid session, clearing cookie")
-        cookies().delete("sessionId")
-        return null
-      }
-
-      // Convert superadmin data to user format with isSuperadmin flag
-      return {
-        ...superadminData,
-        isAdmin: true, // Superadmin has all admin privileges
-        isSuperadmin: true,
-        twoFactorEnabled: false,
-        emailVerified: true,
-        failedLoginAttempts: 0,
-        createdAt: Number.parseInt(superadminData.createdAt as string) || 0,
-      } as User
-    }
-
-    // Check if this is an admin ID
-    if (userId.startsWith("admin-")) {
-      const adminId = userId
-      const adminData = await redis.hgetall(`admin:${adminId}`)
-
-      if (!adminData || Object.keys(adminData).length === 0) {
-        console.log("Admin not found for valid session, clearing cookie")
-        cookies().delete("sessionId")
-        return null
-      }
-
-      // Convert admin data to user format with isAdmin flag
-      return {
-        ...adminData,
-        isAdmin: true,
-        twoFactorEnabled: false,
-        emailVerified: true,
-        failedLoginAttempts: 0,
-        createdAt: Number.parseInt(adminData.createdAt as string) || 0,
-      } as User
-    }
-
-    // Regular user flow
-    const userData = await redis.hgetall(`user:${userId}`)
-
-    if (!userData || Object.keys(userData).length === 0) {
-      console.log("User not found for valid session, clearing cookie")
-      cookies().delete("sessionId")
+    const [user] = await db.select().from(users).where(eq(users.id, userId))
+    if (!user) {
+      (await cookies()).delete("sessionId")
       return null
     }
 
-    // Convert string boolean values to actual booleans
-    const user: User = {
-      ...userData,
-      twoFactorEnabled: userData.twoFactorEnabled === "true" || userData.twoFactorEnabled === true,
-      emailVerified: userData.emailVerified === "true" || userData.emailVerified === true,
-      failedLoginAttempts: Number.parseInt(userData.failedLoginAttempts as string) || 0,
-      createdAt: Number.parseInt(userData.createdAt as string) || 0,
-      updatedAt: userData.updatedAt ? Number.parseInt(userData.updatedAt as string) : undefined,
-      lastLogin: userData.lastLogin ? Number.parseInt(userData.lastLogin as string) : undefined,
-      lockedUntil: userData.lockedUntil ? Number.parseInt(userData.lockedUntil as string) : undefined,
-    }
-
-    return user
+    return user as User
   } catch (error) {
     console.error("Failed to get current user:", error)
     return null
   }
 }
 
-// Authenticate user
 export async function authenticateUser(formData: FormData): Promise<{
   success: boolean
   message: string
   userId?: string
   requireTwoFactor?: boolean
-  redirectTo?: string // Added redirectTo property
-  isSuperadmin?: boolean // Added isSuperadmin flag
+  redirectTo?: string
+  isSuperadmin?: boolean
 }> {
   try {
     const usernameOrEmail = formData.get("email") as string
     const password = formData.get("password") as string
-    const ipAddress = headers().get("x-forwarded-for") || "unknown"
+    const ipAddress = (await headers()).get("x-forwarded-for") || "unknown"
 
-    console.log(`Login attempt for: ${usernameOrEmail}`)
-
-    // Basic validation
     if (!usernameOrEmail || !password) {
-      console.log("Missing username/email or password")
       return { success: false, message: "Username/email and password are required" }
     }
 
-    // Check rate limit
     const rateLimitCheck = await checkRateLimit(`ip:${ipAddress}`, "login")
     if (!rateLimitCheck.success) {
-      console.log("Rate limit exceeded")
       return { success: false, message: rateLimitCheck.message || "Too many login attempts" }
     }
 
-    // Initialize superadmin if needed
-    await initSuperadmin()
-
-    // Check if this is the superadmin by name
-    if (usernameOrEmail === "Nishchal Reddy") {
-      console.log("Attempting superadmin login by name")
-      const superadminId = await redis.get("superadmin:username:Nishchal Reddy")
-
-      if (superadminId) {
-        const superadmin = await redis.hgetall(`superadmin:${superadminId}`)
-
-        if (superadmin && (await verifyPassword(password, superadmin.password))) {
-          // Create session
-          const sessionId = await createSession(superadminId as string)
-
-          // Set session cookie
-          cookies().set("sessionId", sessionId, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            maxAge: 60 * 60 * 24 * 7, // 1 week
-            path: "/",
-            sameSite: "lax",
-          })
-
-          // Return success with redirect info instead of redirecting directly
-          return {
-            success: true,
-            message: "Superadmin login successful",
-            userId: superadminId as string,
-            redirectTo: "/superadmin",
-            isSuperadmin: true,
-          }
-        }
-      }
-    }
-
-    // Check if this is the superadmin by email
-    if (usernameOrEmail === "nishchal.reddy@example.com") {
-      console.log("Attempting superadmin login by email")
-      const superadminId = await redis.get("superadmin:email:nishchal.reddy@example.com")
-
-      if (superadminId) {
-        const superadmin = await redis.hgetall(`superadmin:${superadminId}`)
-
-        if (superadmin && (await verifyPassword(password, superadmin.password))) {
-          // Create session
-          const sessionId = await createSession(superadminId as string)
-
-          // Set session cookie
-          cookies().set("sessionId", sessionId, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            maxAge: 60 * 60 * 24 * 7, // 1 week
-            path: "/",
-            sameSite: "lax",
-          })
-
-          // Return success with redirect info instead of redirecting directly
-          return {
-            success: true,
-            message: "Superadmin login successful",
-            userId: superadminId as string,
-            redirectTo: "/superadmin",
-            isSuperadmin: true,
-          }
-        }
-      }
-    }
-
-    // Check if this is an admin login by username
-    const adminIdByName = await redis.get(`admin:username:${usernameOrEmail}`)
-    if (adminIdByName) {
-      console.log(`Admin found for username: ${usernameOrEmail}`)
-      const admin = await redis.hgetall(`admin:${adminIdByName}`)
-
-      if (!admin || Object.keys(admin).length === 0) {
-        console.log(`Admin data not found for ID: ${adminIdByName}`)
-        return { success: false, message: "Invalid username or password" }
-      }
-
-      // Verify admin password
-      let isPasswordValid = false
-      try {
-        isPasswordValid = await verifyPassword(password, admin.password || "")
-      } catch (error) {
-        console.error("Password verification error:", error)
-        return { success: false, message: "Authentication error. Please try again." }
-      }
-
-      if (!isPasswordValid) {
-        return { success: false, message: "Invalid username or password" }
-      }
-
-      // Create a session for admin
-      console.log("Admin authentication successful")
-      let sessionId
-      try {
-        sessionId = await createSession(adminIdByName as string)
-        console.log(`Admin session created: ${sessionId}`)
-      } catch (error) {
-        console.error("Session creation error:", error)
-        return { success: false, message: "Failed to create session. Please try again." }
-      }
-
-      // Set a cookie with the session ID
-      try {
-        cookies().set("sessionId", sessionId, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          maxAge: 60 * 60 * 24 * 7, // 1 week
-          path: "/",
-          sameSite: "lax",
-        })
-        console.log("Admin cookie set")
-      } catch (error) {
-        console.error("Cookie setting error:", error)
-      }
-
-      try {
-        revalidatePath("/admin")
-      } catch (error) {
-        console.error("Path revalidation error:", error)
-      }
-
-      return {
-        success: true,
-        message: "Admin login successful",
-        userId: adminIdByName as string,
-        redirectTo: "/admin",
-      }
-    }
-
-    // Check if this is an admin login by email
-    const adminIdByEmail = await redis.get(`admin:email:${usernameOrEmail}`)
-    if (adminIdByEmail) {
-      console.log(`Admin found for email: ${usernameOrEmail}`)
-      const admin = await redis.hgetall(`admin:${adminIdByEmail}`)
-
-      if (!admin || Object.keys(admin).length === 0) {
-        console.log(`Admin data not found for ID: ${adminIdByEmail}`)
-        return { success: false, message: "Invalid username or password" }
-      }
-
-      // Verify admin password
-      let isPasswordValid = false
-      try {
-        isPasswordValid = await verifyPassword(password, admin.password || "")
-      } catch (error) {
-        console.error("Password verification error:", error)
-        return { success: false, message: "Authentication error. Please try again." }
-      }
-
-      if (!isPasswordValid) {
-        return { success: false, message: "Invalid username or password" }
-      }
-
-      // Create a session for admin
-      console.log("Admin authentication successful")
-      let sessionId
-      try {
-        sessionId = await createSession(adminIdByEmail as string)
-        console.log(`Admin session created: ${sessionId}`)
-      } catch (error) {
-        console.error("Session creation error:", error)
-        return { success: false, message: "Failed to create session. Please try again." }
-      }
-
-      // Set a cookie with the session ID
-      try {
-        cookies().set("sessionId", sessionId, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          maxAge: 60 * 60 * 24 * 7, // 1 week
-          path: "/",
-          sameSite: "lax",
-        })
-        console.log("Admin cookie set")
-      } catch (error) {
-        console.error("Cookie setting error:", error)
-      }
-
-      try {
-        revalidatePath("/admin")
-      } catch (error) {
-        console.error("Path revalidation error:", error)
-      }
-
-      return {
-        success: true,
-        message: "Admin login successful",
-        userId: adminIdByEmail as string,
-        redirectTo: "/admin",
-      }
-    }
-
-    // Regular user login flow - try by username first
-    const userIdByName = await redis.get(`username:${usernameOrEmail}`)
-    if (userIdByName) {
-      const user = await redis.hgetall(`user:${userIdByName}`)
-      if (user && Object.keys(user).length > 0) {
-        // Verify password
-        let isPasswordValid = false
-        try {
-          isPasswordValid = await verifyPassword(password, user.password || "")
-        } catch (error) {
-          console.error("Password verification error:", error)
-          return { success: false, message: "Authentication error. Please try again." }
-        }
-
-        if (isPasswordValid) {
-          // Handle successful login
-          // Reset failed login attempts
-          await redis.hset(`user:${user.id}`, {
-            ...user,
-            failedLoginAttempts: 0,
-            lockedUntil: null,
-            lastLogin: Date.now(),
-          })
-
-          // Create a session
-          console.log("Creating session")
-          let sessionId
-          try {
-            sessionId = await createSession(user.id as string)
-            console.log(`Session created: ${sessionId}`)
-          } catch (error) {
-            console.error("Session creation error:", error)
-            return { success: false, message: "Failed to create session. Please try again." }
-          }
-
-          // Set a cookie with the session ID
-          try {
-            cookies().set("sessionId", sessionId, {
-              httpOnly: true,
-              secure: process.env.NODE_ENV === "production",
-              maxAge: 60 * 60 * 24 * 7, // 1 week
-              path: "/",
-              sameSite: "lax", // Changed from strict to strict to lax for better cross-site experience
-            })
-            console.log("Cookie set")
-          } catch (error) {
-            console.error("Cookie setting error:", error)
-          }
-
-          try {
-            revalidatePath("/dashboard")
-          } catch (error) {
-            console.error("Path revalidation error:", error)
-          }
-
-          return {
-            success: true,
-            message: "Login successful",
-            userId: user.id as string,
-            redirectTo: "/dashboard",
-          }
-        }
-      }
-    }
-
-    // Try by email
-    const userIdByEmail = await redis.get(`email:${usernameOrEmail}`)
-    if (!userIdByEmail) {
-      console.log(`User not found for: ${usernameOrEmail}`)
+    const [user] = await db.select().from(users).where(
+      or(
+        eq(users.email, usernameOrEmail),
+        eq(users.username, usernameOrEmail)
+      )
+    )
+    if (!user) {
       return { success: false, message: "Invalid username or password" }
     }
 
-    const user = await redis.hgetall(`user:${userIdByEmail}`)
-    if (!user || Object.keys(user).length === 0) {
-      console.log(`User data not found for ID: ${userIdByEmail}`)
-      return { success: false, message: "Invalid username or password" }
-    }
-
-    console.log(`User found: ${user.id}`)
-
-    // Check if account is locked
-    if (user.lockedUntil && Number.parseInt(user.lockedUntil as string) > Date.now()) {
-      console.log(`Account locked until: ${new Date(Number.parseInt(user.lockedUntil as string)).toLocaleTimeString()}`)
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
       return {
         success: false,
-        message: `Account is locked. Please try again after ${new Date(
-          Number.parseInt(user.lockedUntil as string),
-        ).toLocaleTimeString()}`,
+        message: `Account is locked. Please try again after ${user.lockedUntil.toLocaleTimeString()}`,
       }
     }
 
-    // Verify password
     let isPasswordValid = false
     try {
       isPasswordValid = await verifyPassword(password, user.password || "")
     } catch (error) {
-      console.error("Password verification error:", error)
       return { success: false, message: "Authentication error. Please try again." }
     }
 
-    console.log(`Password valid: ${isPasswordValid}`)
-
     if (!isPasswordValid) {
-      // Increment failed login attempts
-      const failedAttempts = (Number.parseInt(user.failedLoginAttempts as string) || 0) + 1
-      console.log(`Failed login attempts: ${failedAttempts}`)
-
-      // Lock account after 5 failed attempts
+      const failedAttempts = (user.failedLoginAttempts || 0) + 1
       if (failedAttempts >= 5) {
-        const lockUntil = Date.now() + 15 * 60 * 1000 // 15 minutes
-        console.log(`Locking account until: ${new Date(lockUntil).toLocaleTimeString()}`)
-
-        await redis.hset(`user:${user.id}`, {
-          ...user,
-          failedLoginAttempts: failedAttempts,
-          lockedUntil: lockUntil,
-        })
-
-        return {
-          success: false,
-          message: "Too many failed login attempts. Account is locked for 15 minutes.",
-        }
+        const lockUntil = new Date(Date.now() + 15 * 60 * 1000)
+        await db.update(users).set({ failedLoginAttempts: failedAttempts, lockedUntil: lockUntil }).where(eq(users.id, user.id))
+        return { success: false, message: "Too many failed login attempts. Account is locked for 15 minutes." }
       }
-
-      // Update failed login attempts
-      await redis.hset(`user:${user.id}`, {
-        ...user,
-        failedLoginAttempts: failedAttempts,
-      })
-
+      await db.update(users).set({ failedLoginAttempts: failedAttempts }).where(eq(users.id, user.id))
       return { success: false, message: "Invalid username or password" }
     }
 
-    // Reset failed login attempts
-    await redis.hset(`user:${user.id}`, {
-      ...user,
+    await db.update(users).set({
       failedLoginAttempts: 0,
       lockedUntil: null,
-      lastLogin: Date.now(),
-    })
+      lastLogin: new Date(),
+    }).where(eq(users.id, user.id))
 
-    console.log("Authentication successful")
+    if (user.twoFactorEnabled) {
+      // Generate a fresh 6-digit OTP for 2FA
+      const otp = Math.floor(100000 + Math.random() * 900000).toString()
+      const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
 
-    // Check if 2FA is enabled
-    if (user.twoFactorEnabled === "true" || user.twoFactorEnabled === true) {
-      console.log("2FA is enabled, generating token")
-      // Generate a temporary token for 2FA verification
-      const twoFactorToken = generateId()
+      await db.update(users).set({
+        otpCode: otp,
+        otpExpiresAt: otpExpiresAt
+      }).where(eq(users.id, user.id))
 
-      // Store token in Redis with short expiration
-      await redis.set(`2fa:${twoFactorToken}`, user.id, { ex: 300 }) // 5 minutes
+      await sendOtpEmail(user.email, otp, "Account Login")
 
       return {
         success: true,
         message: "Please enter your two-factor authentication code",
-        userId: user.id as string,
+        userId: user.id,
         requireTwoFactor: true,
       }
     }
 
-    // Create a session
-    console.log("Creating session")
     let sessionId
     try {
-      sessionId = await createSession(user.id as string)
-      console.log(`Session created: ${sessionId}`)
+      const reqHeaders = await headers()
+      const userAgent = reqHeaders.get("user-agent") || undefined
+      sessionId = await createSession(user.id, userAgent, ipAddress !== "unknown" ? ipAddress : undefined)
     } catch (error) {
-      console.error("Session creation error:", error)
       return { success: false, message: "Failed to create session. Please try again." }
     }
 
-    // Set a cookie with the session ID
     try {
-      cookies().set("sessionId", sessionId, {
+      (await cookies()).set("sessionId", sessionId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        maxAge: 60 * 60 * 24 * 7, // 1 week
+        maxAge: 60 * 60 * 24 * 7,
         path: "/",
-        sameSite: "lax", // Changed from strict to strict to lax for better cross-site experience
+        sameSite: "lax",
       })
-      console.log("Cookie set")
-    } catch (error) {
-      console.error("Cookie setting error:", error)
-      // Continue even if cookie setting fails - the session is still valid
-    }
+    } catch (error) { }
 
     try {
       revalidatePath("/dashboard")
-    } catch (error) {
-      console.error("Path revalidation error:", error)
-      // Continue even if revalidation fails
-    }
+    } catch (error) { }
 
     return {
       success: true,
       message: "Login successful",
-      userId: user.id as string,
-      redirectTo: "/dashboard",
+      userId: user.id,
+      redirectTo: user.isSuperadmin ? "/superadmin" : user.isAdmin ? "/admin" : "/dashboard",
+      isSuperadmin: user.isSuperadmin || false
     }
   } catch (error) {
-    console.error("Failed to authenticate user:", error)
     return { success: false, message: "Authentication error. Please try again." }
   }
 }
 
-// Verify two-factor authentication
+export async function verifyLoginOtp(userId: string, otp: string): Promise<{ success: boolean; message: string; redirectTo?: string; isSuperadmin?: boolean }> {
+  try {
+    const [user] = await db.select().from(users).where(eq(users.id, userId))
+    if (!user) return { success: false, message: "User not found" }
+
+    if (!user.otpCode || user.otpCode !== otp) {
+      return { success: false, message: "Invalid two-factor code" }
+    }
+
+    if (!user.otpExpiresAt || new Date() > new Date(user.otpExpiresAt)) {
+      return { success: false, message: "Two-factor code expired" }
+    }
+
+    // Clear OTP
+    await db.update(users).set({
+      otpCode: null,
+      otpExpiresAt: null
+    }).where(eq(users.id, userId))
+
+    // Create session now
+    let sessionId
+    try {
+      const reqHeaders = await headers()
+      const userAgent = reqHeaders.get("user-agent") || undefined
+      const ipAddress = reqHeaders.get("x-forwarded-for") || undefined
+      sessionId = await createSession(userId, userAgent, ipAddress)
+    } catch (sessionError) {
+      sessionId = `fallback-session-${Date.now()}`
+    }
+
+    try {
+      (await cookies()).set("sessionId", sessionId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24 * 7,
+        path: "/",
+        sameSite: "lax",
+      })
+    } catch (cookieError) { }
+
+    try {
+      revalidatePath("/dashboard")
+    } catch (revalidateError) { }
+
+    const isSuperadmin = user.isSuperadmin || user.email === 'nishchalreddy2005@gmail.com'
+    const redirectTo = isSuperadmin ? "/superadmin" : user.isAdmin ? "/admin" : "/dashboard"
+
+    return { success: true, message: "Login successful", redirectTo, isSuperadmin }
+  } catch (error) {
+    console.error("Failed to verify login OTP:", error)
+    return { success: false, message: "Verification failed. Please try again." }
+  }
+}
+
 export async function verifyTwoFactor(
   formData: FormData,
 ): Promise<{ success: boolean; message: string; userId?: string }> {
   try {
     const token = formData.get("token") as string
-    const twoFactorToken = formData.get("twoFactorToken") as string
+    const userId = formData.get("userId") as string
 
-    if (!token || !twoFactorToken) {
+    if (!token || !userId) {
       return { success: false, message: "Missing required fields" }
     }
 
-    // Get user ID from temporary token
-    const userId = await redis.get(`2fa:${twoFactorToken}`)
-
-    if (!userId) {
-      return { success: false, message: "Invalid or expired verification session" }
-    }
-
-    // Get user
-    const user = await getUserById(userId as string)
+    const user = await getUserById(userId)
 
     if (!user || !user.twoFactorSecret) {
       return { success: false, message: "User not found or 2FA not set up" }
     }
 
-    // Verify token
     const isTokenValid = verifyTwoFactorToken(user.twoFactorSecret, token)
 
     if (!isTokenValid) {
       return { success: false, message: "Invalid verification code" }
     }
 
-    // Delete temporary token
-    await redis.del(`2fa:${twoFactorToken}`)
+    const reqHeaders = await headers()
+    const userAgent = reqHeaders.get("user-agent") || undefined
+    const ipAddress = reqHeaders.get("x-forwarded-for") || undefined
+    const sessionId = await createSession(user.id, userAgent, ipAddress);
 
-    // Create a session
-    const sessionId = await createSession(user.id)
-
-    // Set a cookie with the session ID
-    cookies().set("sessionId", sessionId, {
+    (await cookies()).set("sessionId", sessionId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      maxAge: 60 * 60 * 24 * 7, // 1 week
+      maxAge: 60 * 60 * 24 * 7,
       path: "/",
-      sameSite: "strict",
+      sameSite: "lax",
     })
 
-    // Update last login
-    await redis.hset(`user:${user.id}`, {
-      ...user,
-      lastLogin: Date.now(),
-    })
+    await db.update(users).set({ lastLogin: new Date() }).where(eq(users.id, user.id))
 
     revalidatePath("/dashboard")
     return { success: true, message: "Login successful", userId: user.id }
   } catch (error) {
-    console.error("Failed to verify two-factor authentication:", error)
-    return { success: false, message: `Error: ${error.message}` }
+    return { success: false, message: `Error` }
   }
 }
 
-// Logout user
 export async function logoutUser(): Promise<{ success: boolean; message: string }> {
   try {
-    console.log("Logout server action called")
-    const sessionId = cookies().get("sessionId")?.value
-
-    console.log(`Session ID from cookie: ${sessionId || "none"}`)
-
+    const sessionId = (await cookies()).get("sessionId")?.value
     if (sessionId) {
-      const result = await invalidateSession(sessionId)
-      console.log(`Session invalidation result: ${result}`)
+      await invalidateSession(sessionId)
     }
-
-    // Delete the cookie regardless
-    cookies().delete("sessionId")
-    console.log("Session cookie deleted")
-
+    (await cookies()).delete("sessionId")
     revalidatePath("/")
     return { success: true, message: "Logout successful" }
   } catch (error) {
-    console.error("Failed to logout user:", error)
-
-    // Try to delete the cookie even if there was an error
-    try {
-      cookies().delete("sessionId")
-    } catch (cookieError) {
-      console.error("Failed to delete cookie:", cookieError)
-    }
-
-    return { success: false, message: `Error: ${error.message}` }
+    try { (await cookies()).delete("sessionId") } catch (cookieError) { }
+    return { success: false, message: `Error` }
   }
 }
 
-// Admin functions
 export async function getAllUsers(): Promise<User[]> {
   try {
-    console.log("getAllUsers: Starting function")
-
-    // Get current user to verify admin status
     const currentUser = await getCurrentUser()
     if (!currentUser || !currentUser.isAdmin) {
-      console.log("getAllUsers: Current user is not an admin")
       return []
     }
-
-    console.log("getAllUsers: Admin verified, fetching users")
-
-    // Use a different approach - scan instead of keys
-    // This is a safer approach that works better with Redis
-    const users: User[] = []
-
-    try {
-      // Manually create some test users if none exist
-      const testUsers = await redis.keys("user:*")
-      console.log(`getAllUsers: Found ${testUsers ? testUsers.length : 0} user keys`)
-
-      if (!testUsers || testUsers.length === 0) {
-        console.log("getAllUsers: No users found, returning empty array")
-        return []
-      }
-
-      // Process each user key
-      for (const key of testUsers) {
-        // Only process keys that are direct user records (not tasks, sessions, or other related data)
-        if (
-          typeof key === "string" &&
-          key.startsWith("user:") &&
-          !key.includes(":sessions") &&
-          !key.includes(":tasks") &&
-          key.split(":").length === 2
-        ) {
-          try {
-            console.log(`getAllUsers: Processing user key ${key}`)
-            const userData = await redis.hgetall(key)
-
-            if (userData && Object.keys(userData).length > 0) {
-              console.log(`getAllUsers: Found valid user data for ${key}`)
-              users.push({
-                ...userData,
-                twoFactorEnabled: userData.twoFactorEnabled === "true" || userData.twoFactorEnabled === true,
-                emailVerified: userData.emailVerified === "true" || userData.emailVerified === true,
-                failedLoginAttempts: Number.parseInt(userData.failedLoginAttempts as string) || 0,
-                createdAt: Number.parseInt(userData.createdAt as string) || 0,
-              } as User)
-            } else {
-              console.log(`getAllUsers: No valid user data for ${key}`)
-            }
-          } catch (userError) {
-            console.error(`getAllUsers: Error processing user ${key}:`, userError)
-            // Continue with next user
-          }
-        }
-      }
-    } catch (scanError) {
-      console.error("getAllUsers: Error scanning for users:", scanError)
-    }
-
-    console.log(`getAllUsers: Returning ${users.length} users`)
-    return users
+    const allUsers = await db.select().from(users)
+    return allUsers as User[]
   } catch (error) {
-    console.error("getAllUsers: Failed to get all users:", error)
     return []
   }
 }
 
 export async function deleteUser(userId: string): Promise<{ success: boolean; message: string }> {
   try {
-    // Get current user to verify admin status
     const currentUser = await getCurrentUser()
     if (!currentUser || !currentUser.isAdmin) {
       return { success: false, message: "Unauthorized access" }
     }
 
-    // Get user data
-    const user = await getUserById(userId)
-    if (!user) {
-      return { success: false, message: "User not found" }
+    // Hierarchical permissions check
+    const [targetUser] = await db.select().from(users).where(eq(users.id, userId))
+    if (!targetUser) return { success: false, message: "User not found" }
+
+    if (targetUser.isSuperadmin || targetUser.isAdmin) {
+      if (!currentUser.isSuperadmin) {
+        return { success: false, message: "Standard Admins cannot delete other Admins or Superadmins" }
+      }
+
+      // Superadmin self-deletion protection
+      if (targetUser.id === currentUser.id) {
+        return { success: false, message: "Superadmins cannot delete their own account from the dashboard" }
+      }
     }
 
-    // Delete user's sessions
-    const sessionIds = await redis.smembers(`user:${userId}:sessions`)
-    for (const sessionId of sessionIds) {
-      await redis.del(`session:${sessionId}`)
-    }
-    await redis.del(`user:${userId}:sessions`)
-
-    // Delete email mapping
-    await redis.del(`email:${user.email}`)
-
-    // Delete user data
-    await redis.del(`user:${userId}`)
-
+    await db.delete(sessions).where(eq(sessions.userId, userId))
+    await db.delete(users).where(eq(users.id, userId))
     return { success: true, message: "User deleted successfully" }
   } catch (error) {
-    console.error("Failed to delete user:", error)
     return { success: false, message: "Failed to delete user" }
   }
 }
@@ -881,48 +454,304 @@ export async function updateUser(
   userData: Partial<User>,
 ): Promise<{ success: boolean; message: string }> {
   try {
-    // Get current user to verify admin status
     const currentUser = await getCurrentUser()
     if (!currentUser || !currentUser.isAdmin) {
       return { success: false, message: "Unauthorized access" }
     }
 
-    // Get existing user data
-    const existingUser = await getUserById(userId)
-    if (!existingUser) {
-      return { success: false, message: "User not found" }
-    }
+    // Hierarchical permissions check
+    const [targetUser] = await db.select().from(users).where(eq(users.id, userId))
+    if (!targetUser) return { success: false, message: "User not found" }
 
-    // Handle email change
-    if (userData.email && userData.email !== existingUser.email) {
-      // Check if new email is already in use
-      const existingUserId = await redis.get(`email:${userData.email}`)
-      if (existingUserId && existingUserId !== userId) {
-        return { success: false, message: "Email already in use" }
+    if (targetUser.isSuperadmin || targetUser.isAdmin) {
+      if (!currentUser.isSuperadmin) {
+        return { success: false, message: "Standard Admins cannot update other Admins or Superadmins" }
       }
-
-      // Update email mapping
-      await redis.del(`email:${existingUser.email}`)
-      await redis.set(`email:${userData.email}`, userId)
     }
 
-    // Handle password change
     if (userData.password) {
       userData.password = await hashPassword(userData.password)
     }
 
-    // Update user data
-    const updatedUser = {
-      ...existingUser,
-      ...userData,
-      updatedAt: Date.now(),
-    }
-
-    await redis.hset(`user:${userId}`, updatedUser)
-
+    await db.update(users).set({ ...userData, updatedAt: new Date() }).where(eq(users.id, userId))
     return { success: true, message: "User updated successfully" }
   } catch (error) {
-    console.error("Failed to update user:", error)
     return { success: false, message: "Failed to update user" }
   }
 }
+
+export async function searchUsers(query: string) {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser) return []
+
+    const searchPattern = `%${query}%`
+
+    const results = await db.select({
+      id: users.id,
+      username: users.username,
+      name: users.name,
+      email: users.email
+    })
+      .from(users)
+      .where(
+        or(
+          ilike(users.username, searchPattern),
+          ilike(users.name, searchPattern),
+          ilike(users.email, searchPattern)
+        )
+      )
+      .limit(10)
+
+    return results
+  } catch (error) {
+    console.error("Failed to search users:", error)
+    return []
+  }
+}
+
+// ----------------------------------------------------
+// ADMINISTRATOR & SUPERADMIN ADVANCED CONTROLS
+// ----------------------------------------------------
+
+export async function resetUserPassword(userId: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || (!currentUser.isAdmin && !currentUser.isSuperadmin)) {
+      return { success: false, message: "Unauthorized access" }
+    }
+
+    const hashedPassword = await hashPassword(newPassword)
+    await db.update(users).set({ password: hashedPassword, updatedAt: new Date() }).where(eq(users.id, userId))
+    return { success: true, message: "User password reset successfully" }
+  } catch (error) {
+    console.error("Failed to reset password", error)
+    return { success: false, message: "Failed to reset user password" }
+  }
+}
+
+export async function suspendUser(userId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || !currentUser.isSuperadmin) return { success: false, message: "Only Superadmins can suspend users." }
+
+    // Terminate active sessions instantly
+    await db.delete(sessions).where(eq(sessions.userId, userId))
+    // Apply suspension flag
+    await db.update(users).set({ isSuspended: true, updatedAt: new Date() }).where(eq(users.id, userId))
+
+    revalidatePath("/superadmin")
+    return { success: true, message: "User safely suspended and logged out" }
+  } catch (error) {
+    return { success: false, message: "Failed to suspend user" }
+  }
+}
+
+export async function unsuspendUser(userId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || !currentUser.isSuperadmin) return { success: false, message: "Only Superadmins can unsuspend users." }
+
+    await db.update(users).set({ isSuspended: false, updatedAt: new Date() }).where(eq(users.id, userId))
+
+    revalidatePath("/superadmin")
+    return { success: true, message: "User restored" }
+  } catch (error) {
+    return { success: false, message: "Failed to restore user" }
+  }
+}
+
+export async function hardDeleteUser(userId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || !currentUser.isSuperadmin) return { success: false, message: "Unauthorized access" }
+
+    // Hard wipe logic
+    await db.delete(tasks).where(eq(tasks.userId, userId))
+    await db.delete(sessions).where(eq(sessions.userId, userId))
+    await db.delete(users).where(eq(users.id, userId))
+
+    revalidatePath("/superadmin")
+    return { success: true, message: "User completely wiped from the database" }
+  } catch (error) {
+    return { success: false, message: "Failed to hard-delete user" }
+  }
+}
+
+export async function forceDisable2FA(userId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || !currentUser.isSuperadmin) return { success: false, message: "Unauthorized access" }
+
+    await db.update(users).set({ twoFactorEnabled: false, twoFactorSecret: null, updatedAt: new Date() }).where(eq(users.id, userId))
+    return { success: true, message: "User's Two-Factor Authentication has been forcefully disabled" }
+  } catch (error) {
+    return { success: false, message: "Failed to disable 2FA" }
+  }
+}
+
+export async function getGlobalStats() {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || (!currentUser.isAdmin && !currentUser.isSuperadmin)) {
+      return null
+    }
+
+    // Since SQLite lacks full subquery `.count()`, we execute native arrays 
+    const allUsers = await db.select({ id: users.id }).from(users)
+    const allTasks = await db.select({ id: tasks.id }).from(tasks)
+    const allSessions = await db.select({ id: sessions.id }).from(sessions)
+
+    return {
+      totalUsers: allUsers.length,
+      totalTasks: allTasks.length,
+      totalActiveSessions: allSessions.length
+    }
+  } catch (error) {
+    console.error("Failed to compile global stats", error)
+    return null
+  }
+}
+
+export async function forceInvalidateUserSessions(userId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || !currentUser.isAdmin) {
+      return { success: false, message: "Unauthorized access" }
+    }
+
+    // Hierarchical permissions check
+    const [targetUser] = await db.select().from(users).where(eq(users.id, userId))
+    if (!targetUser) return { success: false, message: "User not found" }
+
+    if (targetUser.isSuperadmin || targetUser.isAdmin) {
+      if (!currentUser.isSuperadmin) {
+        return { success: false, message: "Standard Admins cannot force logout other Admins or Superadmins" }
+      }
+    }
+
+    await db.delete(sessions).where(eq(sessions.userId, userId))
+    return { success: true, message: "User sessions invalidated successfully" }
+  } catch (error) {
+    console.error("Failed to invalidate sessions:", error)
+    return { success: false, message: "Failed to invalidate user sessions" }
+  }
+}
+
+export async function exportSystemData(): Promise<{ success: boolean; data?: string; message?: string }> {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || !currentUser.isSuperadmin) {
+      return { success: false, message: "Unauthorized access" }
+    }
+
+    const allUsers = await db.select().from(users)
+    const allTasks = await db.select().from(tasks)
+
+    // Build simple CSV structure
+    const userHeader = "id,email,username,name,createdAt,isAdmin,isSuperadmin,isSuspended\n"
+    const userRows = allUsers.map(u => `${u.id},${u.email},${u.username},"${u.name}",${u.createdAt},${u.isAdmin},${u.isSuperadmin},${u.isSuspended}`).join("\n")
+
+    const taskHeader = "\nid,title,userId,category,priority,completed,createdAt\n"
+    const taskRows = allTasks.map(t => `${t.id},"${t.title.replace(/"/g, '""')}",${t.userId},${t.category},${t.priority},${t.completed},${t.createdAt}`).join("\n")
+
+    const csvData = userHeader + userRows + "\n" + taskHeader + taskRows
+
+    return { success: true, data: csvData }
+  } catch (error) {
+    console.error("Failed to export system data:", error)
+    return { success: false, message: "Failed to export data" }
+  }
+}
+
+export async function getDetailedSystemHealth() {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser || !currentUser.isSuperadmin) {
+      return null
+    }
+
+    const allUsers = await db.select({ id: users.id, isSuspended: users.isSuspended, isAdmin: users.isAdmin, isSuperadmin: users.isSuperadmin }).from(users)
+    const allTasks = await db.select({ id: tasks.id, completed: tasks.completed }).from(tasks)
+    const activeSessions = await db.select({ id: sessions.id }).from(sessions)
+
+    const suspendedUsersCount = allUsers.filter(u => u.isSuspended).length
+    const adminCount = allUsers.filter(u => u.isAdmin && !u.isSuperadmin).length
+    const superadminCount = allUsers.filter(u => u.isSuperadmin).length
+    const completedTasksCount = allTasks.filter(t => t.completed).length
+
+    return {
+      success: true,
+      stats: {
+        totalUsers: allUsers.length,
+        suspendedUsers: suspendedUsersCount,
+        admins: adminCount,
+        superadmins: superadminCount,
+        totalTasks: allTasks.length,
+        completedTasks: completedTasksCount,
+        activeSessions: activeSessions.length,
+        uptime: process.uptime(), // Simple server uptime metric
+        memoryUsage: process.memoryUsage().heapUsed / 1024 / 1024 // MB
+      }
+    }
+  } catch (error) {
+    console.error("Failed to compile detailed system health", error)
+    return { success: false, message: "Failed to compile system health metrics" }
+  }
+}
+
+export async function updateUserPreferences(preferences: any) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) return { success: false, message: "Not authenticated" }
+
+    await db.update(users)
+      .set({ preferences: JSON.stringify(preferences) })
+      .where(eq(users.id, user.id))
+
+    return { success: true }
+  } catch (error) {
+    console.error("Failed to update user preferences:", error)
+    return { success: false }
+  }
+}
+
+export async function savePushSubscription(subscription: any) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) return { success: false, message: "Not authenticated" }
+
+    await db.update(users)
+      .set({ pushSubscription: JSON.stringify(subscription) })
+      .where(eq(users.id, user.id))
+
+    return { success: true }
+  } catch (error) {
+    console.error("Failed to save push subscription:", error)
+    return { success: false }
+  }
+}
+
+export async function searchUsersByEmail(query: string) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) return []
+
+    const results = await db.select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      username: users.username,
+      profilePicture: users.profilePicture
+    })
+      .from(users)
+      .where(ilike(users.email, `%${query}%`))
+      .limit(5)
+
+    return results
+  } catch (error) {
+    console.error("Failed to search users:", error)
+    return []
+  }
+}
+

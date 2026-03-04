@@ -1,69 +1,51 @@
 "use server"
 
-import { redis } from "@/lib/redis"
+import { db } from "@/lib/db"
+import { tasks } from "@/lib/db/schema"
 import type { Task } from "@/lib/types"
 import { revalidatePath } from "next/cache"
 import { getCurrentUser } from "./user-actions"
-import { DEMO_USER_ID, initializeDatabase } from "@/lib/init-db"
+import crypto from "crypto"
 
-// Create a new task
 export async function createTask(formData: FormData): Promise<Task | null> {
   try {
-    // Get the current user
     const user = await getCurrentUser()
-    const userId = user ? user.id : DEMO_USER_ID
+    const userId = user ? user.id : "demo-user-123"
 
-    // If using demo user, ensure demo data exists
-    if (userId === DEMO_USER_ID) {
-      await initializeDatabase()
-    }
-
-    // Generate a unique ID for the task
     const taskId = crypto.randomUUID()
 
-    // Create the task object
     const task: Task = {
       id: taskId,
       title: formData.get("title") as string,
       description: formData.get("description") as string,
-      dueDate: formData.get("dueDate") as string,
+      dueDate: new Date(formData.get("dueDate") as string),
       category: formData.get("category") as string,
       priority: formData.get("priority") as "low" | "medium" | "high",
+      sharedWith: formData.get("sharedWith") ? JSON.parse(formData.get("sharedWith") as string) : [],
       completed: false,
       userId,
-      createdAt: Date.now(),
+      parentId: (formData.get("parentId") as string) || null,
+      dependsOn: (formData.get("dependsOn") as string) || null,
+      recurrenceRule: (formData.get("recurrenceRule") as string) || null,
+      nextRecurringDate: null,
+      createdAt: new Date(),
     }
 
-    // Validate required fields
     if (!task.title || !task.dueDate || !task.category || !task.priority) {
-      console.error("Missing required task fields")
       return null
     }
 
-    console.log("Creating task:", task)
+    await db.insert(tasks).values(task)
 
-    // Save the task to Redis
     try {
-      // First check if Redis is connected
-      const pingResult = await redis.ping()
-      console.log("Redis ping result:", pingResult)
-
-      // Save the task
-      await redis.hset(`task:${taskId}`, task)
-
-      // Add the task ID to the user's task set
-      await redis.sadd(`user:${userId}:tasks`, taskId)
-
-      console.log("Task created successfully:", taskId)
-
       revalidatePath("/dashboard")
-      return task
-    } catch (redisError) {
-      console.error("Redis connection error in createTask:", redisError)
-      throw new Error("Database connection error. Please try again later.")
-    }
+      revalidatePath("/calendar")
+      revalidatePath("/")
+    } catch (e) { }
+
+    return task
   } catch (error) {
     console.error("Failed to create task:", error)
-    throw error
+    throw new Error("Database connection error. Please try again later.")
   }
 }

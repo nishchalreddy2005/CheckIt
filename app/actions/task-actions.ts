@@ -1,332 +1,251 @@
 "use server"
 
-import { redis } from "@/lib/redis"
+import { db } from "@/lib/db"
+import { tasks } from "@/lib/db/schema"
+import { eq, or, arrayContains, asc } from "drizzle-orm"
 import type { Task, TaskStats } from "@/lib/types"
 import { revalidatePath } from "next/cache"
-import { DEMO_USER_ID, initializeDatabase } from "@/lib/init-db"
 import { getCurrentUser } from "./user-actions"
 import { createTask as createTaskAction } from "./task-actions-create"
+import crypto from "crypto"
 
-// Export the dedicated create task function
 export const createTask = createTaskAction
 
-// Initialize database with demo data if needed
 export async function ensureDemoData() {
-  return initializeDatabase()
+  return true
 }
 
-// Update the getTasks function to ensure taskIds is always an array
 export async function getTasks(userId?: string): Promise<Task[]> {
   try {
-    console.log("getTasks called with userId:", userId)
-
-    // If no userId is provided, try to get the current user
+    const currentUser = await getCurrentUser()
     if (!userId) {
-      const user = await getCurrentUser()
-      if (user) {
-        userId = user.id
-        console.log("Current user found:", userId)
-      } else {
-        // Fall back to demo user if no user is logged in
-        userId = DEMO_USER_ID
-        console.log("Using demo user:", userId)
-        await ensureDemoData()
-      }
+      userId = currentUser ? currentUser.id : "demo-user-123"
     }
 
-    console.log("Fetching tasks for user:", userId)
-    let taskIds
-    try {
-      taskIds = await redis.smembers(`user:${userId}:tasks`)
-      console.log("Raw taskIds result:", taskIds)
-    } catch (error) {
-      console.error("Error fetching task IDs:", error)
-      return []
-    }
+    // A user can see tasks they created OR tasks where their USERNAME is in the sharedWith array
+    const userUsername = currentUser?.username || "demo_user"
 
-    // Ensure taskIds is an array
-    if (!taskIds) {
-      console.log("No taskIds returned, using empty array")
-      taskIds = []
-    } else if (!Array.isArray(taskIds)) {
-      console.log("taskIds is not an array, converting:", taskIds)
-      // If it's a single value, convert to array
-      if (typeof taskIds === "string") {
-        taskIds = [taskIds]
-      } else {
-        // Try to convert to array if possible, otherwise use empty array
-        try {
-          taskIds = Array.from(taskIds)
-        } catch (e) {
-          console.error("Could not convert taskIds to array:", e)
-          taskIds = []
-        }
-      }
-    }
+    const userTasks = await db.select().from(tasks).where(
+      or(
+        eq(tasks.userId, userId),
+        arrayContains(tasks.sharedWith, [userUsername])
+      )
+    )
 
-    console.log("Task IDs after processing:", taskIds)
+    const filteredTasks = userTasks.sort((a, b) => {
+      const dateA = a.dueDate ? a.dueDate.getTime() : 0;
+      const dateB = b.dueDate ? b.dueDate.getTime() : 0;
+      return dateA - dateB;
+    });
 
-    // Check if taskIds is an array and has length
-    if (taskIds.length === 0) {
-      console.log("No tasks found for user")
-      return []
-    }
-
-    // Use Promise.all to fetch all tasks in parallel
-    const tasksPromises = taskIds.map(async (id) => {
-      try {
-        const taskData = await redis.hgetall(`task:${id}`)
-        if (!taskData || Object.keys(taskData).length === 0) {
-          console.log(`Task ${id} not found or empty`)
-          return null
-        }
-
-        // Convert string boolean to actual boolean
-        const task = {
-          ...taskData,
-          completed: taskData.completed === "true" || taskData.completed === true,
-        } as Task
-
-        console.log(`Task ${id} fetched:`, task.title)
-        return task
-      } catch (error) {
-        console.error(`Failed to get task ${id}:`, error)
-        return null
-      }
-    })
-
-    const tasks = await Promise.all(tasksPromises)
-
-    // Filter out null values and sort by due date
-    const filteredTasks = tasks.filter(Boolean).sort((a, b) => {
-      // Sort by due date (ascending)
-      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
-    })
-
-    console.log(`Returning ${filteredTasks.length} tasks`)
-    return filteredTasks
+    return filteredTasks as Task[]
   } catch (error) {
-    console.error("Failed to get tasks:", error)
     return []
   }
 }
 
-// Get task stats for a user
 export async function getTaskStats(userId?: string): Promise<TaskStats> {
   try {
-    // If no userId is provided, try to get the current user
     if (!userId) {
       const user = await getCurrentUser()
-      if (user) {
-        userId = user.id
-      } else {
-        // Fall back to demo user if no user is logged in
-        userId = DEMO_USER_ID
-        await ensureDemoData()
-      }
+      userId = user ? user.id : "demo-user-123"
     }
 
-    const tasks = await getTasks(userId)
+    const userTasks = await getTasks(userId)
 
     const stats: TaskStats = {
       completed: 0,
-      total: tasks.length,
+      total: userTasks.length,
       categories: {},
     }
 
-    tasks.forEach((task) => {
-      // Initialize category if it doesn't exist
-      if (!stats.categories[task.category]) {
-        stats.categories[task.category] = { completed: 0, total: 0 }
+    userTasks.forEach((task) => {
+      const category = task.category || "General"
+      if (!stats.categories[category]) {
+        stats.categories[category] = { completed: 0, total: 0 }
       }
 
-      // Increment category total
-      stats.categories[task.category].total++
+      stats.categories[category].total++
 
-      // Increment completed counts if task is completed
       if (task.completed) {
         stats.completed++
-        stats.categories[task.category].completed++
+        stats.categories[category].completed++
       }
     })
 
     return stats
   } catch (error) {
-    console.error("Failed to get task stats:", error)
     return { completed: 0, total: 0, categories: {} }
   }
 }
 
-// Update a task
 export async function updateTask(formData: FormData): Promise<Task | null> {
   try {
-    // Get the current user
     const user = await getCurrentUser()
-    const userId = user ? user.id : DEMO_USER_ID
-
+    const userId = user ? user.id : "demo-user-123"
     const taskId = formData.get("id") as string
 
-    // Get the existing task
-    const existingTask = (await redis.hgetall(`task:${taskId}`)) as Task | null
+    const [existingTask] = await db.select().from(tasks).where(eq(tasks.id, taskId))
 
-    // Check if task exists and belongs to the user
-    if (!existingTask || existingTask.userId !== userId) {
+    const userUsername = user?.username || "demo_user"
+    if (!existingTask || (existingTask.userId !== userId && !(existingTask.sharedWith || []).includes(userUsername))) {
       return null
     }
 
-    // Update the task
-    const updatedTask: Task = {
+    const updatedTask = {
       ...existingTask,
       title: formData.get("title") as string,
       description: formData.get("description") as string,
-      dueDate: formData.get("dueDate") as string,
+      dueDate: formData.get("dueDate") ? new Date(formData.get("dueDate") as string) : existingTask.dueDate,
       category: formData.get("category") as string,
       priority: formData.get("priority") as "low" | "medium" | "high",
+      sharedWith: formData.get("sharedWith") ? JSON.parse(formData.get("sharedWith") as string) : existingTask.sharedWith,
+      parentId: (formData.get("parentId") as string) || existingTask.parentId,
+      dependsOn: (formData.get("dependsOn") as string) || existingTask.dependsOn,
+      recurrenceRule: (formData.get("recurrenceRule") as string) || existingTask.recurrenceRule,
     }
 
-    await redis.hset(`task:${taskId}`, updatedTask)
+    await db.update(tasks).set(updatedTask).where(eq(tasks.id, taskId))
 
-    revalidatePath("/dashboard")
-    revalidatePath("/calendar")
-    return updatedTask
+    try {
+      revalidatePath("/dashboard")
+      revalidatePath("/calendar")
+    } catch (e) { }
+
+    return updatedTask as Task
   } catch (error) {
-    console.error("Failed to update task:", error)
     return null
   }
 }
 
-// Delete a task
 export async function deleteTask(formData: FormData): Promise<boolean> {
   try {
-    // Get the current user
     const user = await getCurrentUser()
-    const userId = user ? user.id : DEMO_USER_ID
-
+    const userId = user ? user.id : "demo-user-123"
     const taskId = formData.get("id") as string
 
-    // Get the existing task
-    const existingTask = (await redis.hgetall(`task:${taskId}`)) as Task | null
+    const [existingTask] = await db.select().from(tasks).where(eq(tasks.id, taskId))
 
-    // Check if task exists and belongs to the user
-    if (!existingTask || existingTask.userId !== userId) {
+    const userUsername = user?.username || "demo_user"
+    if (!existingTask || (existingTask.userId !== userId && !(existingTask.sharedWith || []).includes(userUsername))) {
       return false
     }
 
-    // Delete the task
-    await redis.del(`task:${taskId}`)
+    await db.delete(tasks).where(eq(tasks.id, taskId))
 
-    // Remove task ID from user's task set
-    await redis.srem(`user:${userId}:tasks`, taskId)
-
-    revalidatePath("/dashboard")
+    try { revalidatePath("/dashboard") } catch (e) { }
     return true
   } catch (error) {
-    console.error("Failed to delete task:", error)
     return false
   }
 }
 
-// Toggle task completion status
 export async function toggleTaskCompletion(formData: FormData): Promise<Task | null> {
   try {
-    // Get the current user
     const user = await getCurrentUser()
-    const userId = user ? user.id : DEMO_USER_ID
-
+    const userId = user ? user.id : "demo-user-123"
     const taskId = formData.get("id") as string
 
-    // Get the existing task
-    const existingTask = (await redis.hgetall(`task:${taskId}`)) as Task | null
+    const [existingTask] = await db.select().from(tasks).where(eq(tasks.id, taskId))
 
-    // Check if task exists and belongs to the user
-    if (!existingTask || existingTask.userId !== userId) {
+    const userUsername = user?.username || "demo_user"
+    if (!existingTask || (existingTask.userId !== userId && !(existingTask.sharedWith || []).includes(userUsername))) {
       return null
     }
 
-    // Toggle the completed status
-    const updatedTask = {
-      ...existingTask,
-      completed: !existingTask.completed,
+    // BLOCKER CHECK: If this task depends on another, ensure that one is completed
+    if (!existingTask.completed && existingTask.dependsOn) {
+      const [blocker] = await db.select().from(tasks).where(eq(tasks.id, existingTask.dependsOn))
+      if (blocker && !blocker.completed) {
+        throw new Error(`Task is blocked by "${blocker.title}"`)
+      }
     }
 
-    await redis.hset(`task:${taskId}`, updatedTask)
+    const isCompleting = !existingTask.completed
+    const updatedTask = { ...existingTask, completed: isCompleting }
 
-    revalidatePath("/dashboard")
-    return updatedTask
+    await db.update(tasks).set({ completed: updatedTask.completed }).where(eq(tasks.id, taskId))
+
+    // RECURRENCE LOGIC: If a task with a recurrence rule is being completed, create the next instance
+    if (isCompleting && existingTask.recurrenceRule) {
+      const nextDueDate = new Date(existingTask.dueDate!)
+
+      if (existingTask.recurrenceRule === 'daily') {
+        nextDueDate.setDate(nextDueDate.getDate() + 1)
+      } else if (existingTask.recurrenceRule === 'weekly') {
+        nextDueDate.setDate(nextDueDate.getDate() + 7)
+      } else if (existingTask.recurrenceRule === 'monthly') {
+        nextDueDate.setMonth(nextDueDate.getMonth() + 1)
+      }
+
+      const newTask = {
+        ...existingTask,
+        id: crypto.randomUUID(),
+        completed: false,
+        dueDate: nextDueDate,
+        createdAt: new Date(),
+        nextRecurringDate: null // Reset for the next one
+      }
+
+      // Update the current task's nextRecurringDate as a record of when we spawned the next one
+      await db.update(tasks).set({ nextRecurringDate: nextDueDate }).where(eq(tasks.id, taskId))
+      await db.insert(tasks).values(newTask)
+    }
+
+    try { revalidatePath("/dashboard") } catch (e) { }
+    return updatedTask as Task
   } catch (error) {
-    console.error("Failed to toggle task completion:", error)
     return null
   }
 }
 
-// Import tasks from JSON
 export async function importTasks(jsonData: string): Promise<{ success: boolean; message?: string; count?: number }> {
   try {
-    // Get the current user
     const user = await getCurrentUser()
     if (!user) {
       return { success: false, message: "User not authenticated" }
     }
 
-    // Parse the JSON data
-    let tasks
+    let parsedTasks
     try {
-      tasks = JSON.parse(jsonData)
+      parsedTasks = JSON.parse(jsonData)
     } catch (error) {
       return { success: false, message: "Invalid JSON format" }
     }
 
-    // Validate the tasks array
-    if (!Array.isArray(tasks)) {
+    if (!Array.isArray(parsedTasks)) {
       return { success: false, message: "Invalid format: Expected an array of tasks" }
     }
 
-    // Filter valid tasks
-    const validTasks = tasks.filter((task) => task.title && task.dueDate && task.category && task.priority)
+    const validTasks = parsedTasks.filter((task) => task.title && task.dueDate && task.category && task.priority)
 
     if (validTasks.length === 0) {
       return { success: false, message: "No valid tasks found in the file" }
     }
 
-    // Import each task
-    let importedCount = 0
-    for (const taskData of validTasks) {
-      // Generate a new ID for the task
-      const taskId = crypto.randomUUID()
+    const newTasksToInsert = validTasks.map(taskData => ({
+      id: crypto.randomUUID(),
+      title: taskData.title,
+      description: taskData.description || "",
+      dueDate: new Date(taskData.dueDate),
+      category: taskData.category,
+      priority: taskData.priority,
+      completed: taskData.completed || false,
+      userId: user.id,
+      createdAt: new Date(),
+    }))
 
-      // Create the task object
-      const task: Task = {
-        id: taskId,
-        title: taskData.title,
-        description: taskData.description || "",
-        dueDate: taskData.dueDate,
-        category: taskData.category,
-        priority: taskData.priority,
-        completed: taskData.completed || false,
-        userId: user.id,
-        createdAt: Date.now(),
-      }
-
-      // Save the task to Redis
-      await redis.hset(`task:${taskId}`, task)
-
-      // Add the task ID to the user's task set
-      await redis.sadd(`user:${user.id}:tasks`, taskId)
-
-      importedCount++
+    for (const task of newTasksToInsert) {
+      await db.insert(tasks).values(task)
     }
 
-    // Revalidate paths
-    revalidatePath("/dashboard")
-    revalidatePath("/calendar")
+    try {
+      revalidatePath("/dashboard")
+      revalidatePath("/calendar")
+    } catch (e) { }
 
-    return {
-      success: true,
-      message: `Successfully imported ${importedCount} tasks`,
-      count: importedCount,
-    }
+    return { success: true, message: `Successfully imported ${newTasksToInsert.length} tasks`, count: newTasksToInsert.length }
   } catch (error) {
-    console.error("Failed to import tasks:", error)
     return { success: false, message: "An error occurred while importing tasks" }
   }
 }

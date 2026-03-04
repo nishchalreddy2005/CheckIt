@@ -125,22 +125,22 @@ export function TaskSearchFilter({ onSearch, categories }: TaskSearchFilterProps
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-white/50" />
           <Input
             placeholder="Search tasks..."
             value={filters.searchTerm}
             onChange={handleSearchChange}
-            className="pl-8"
+            className="pl-8 glass-input"
           />
         </div>
 
         {/* Category Dropdown - Added directly to the main interface */}
         <div className="w-full sm:w-48">
           <Select value={filters.category} onValueChange={handleCategoryChange}>
-            <SelectTrigger>
+            <SelectTrigger className="glass-input">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="glass-card text-white border-white/20">
               <SelectItem value="all_categories">All Categories</SelectItem>
               {categories.map((category) => (
                 <SelectItem key={category} value={category}>
@@ -151,20 +151,20 @@ export function TaskSearchFilter({ onSearch, categories }: TaskSearchFilterProps
           </Select>
         </div>
 
-        <Button onClick={applyFilters}>Search</Button>
+        <Button onClick={applyFilters} className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)] border-none">Search</Button>
       </div>
 
       {/* Active filters */}
       {activeFilters.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {activeFilters.map((filter) => (
-            <Badge key={filter} variant="secondary" className="flex items-center gap-1">
+            <Badge key={filter} variant="secondary" className="flex items-center gap-1 bg-white/10 hover:bg-white/20 text-white border-none shadow-sm backdrop-blur-md">
               {filter}
-              <X className="h-3 w-3 cursor-pointer" onClick={() => removeFilter(filter)} />
+              <X className="h-3 w-3 cursor-pointer ml-1 opacity-70 hover:opacity-100" onClick={() => removeFilter(filter)} />
             </Badge>
           ))}
           {activeFilters.length > 0 && (
-            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={clearFilters}>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-white/60 hover:text-white hover:bg-white/10" onClick={clearFilters}>
               Clear all
             </Button>
           )}

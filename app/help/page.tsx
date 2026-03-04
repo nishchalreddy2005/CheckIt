@@ -123,7 +123,7 @@ export default function HelpPage() {
                   <div>
                     <h3 className="font-medium text-base mb-1">Email Us</h3>
                     <p className="text-sm text-muted-foreground mb-2">For general inquiries and support:</p>
-                    <p className="text-sm font-medium text-purple-600">support@checkit.com</p>
+                    <p className="text-sm font-medium text-purple-600">checkittaskmanagement@gmail.com</p>
                   </div>
                 </div>
 

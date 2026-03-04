@@ -17,7 +17,7 @@ const initialState = {
 }
 
 // Action wrapper for useActionState
-const updateProfileAction = async (prevState, formData) => {
+const updateProfileAction = async (prevState: any, formData: FormData) => {
   const result = await updateProfile(formData)
   return {
     message: result.message,

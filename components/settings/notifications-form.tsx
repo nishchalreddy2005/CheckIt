@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator"
 import { updateProfile } from "@/app/actions/profile-actions"
 import { useActionState } from "react"
 import type { User } from "@/lib/types"
+import { savePushSubscription } from "@/app/actions/user-actions"
 
 // Initial state for form submission
 const initialState = {
@@ -18,7 +19,7 @@ const initialState = {
 }
 
 // Action wrapper for useActionState
-const updateProfileAction = async (prevState, formData) => {
+const updateProfileAction = async (prevState: any, formData: FormData) => {
   const result = await updateProfile(formData)
   return {
     message: result.message,
@@ -32,6 +33,35 @@ export function NotificationsForm({ user }: { user: User }) {
   const [emailNotifications, setEmailNotifications] = useState(true)
   const [pushNotifications, setPushNotifications] = useState(true)
   const [reminderTime, setReminderTime] = useState("09:00")
+  const [isSubscribing, setIsSubscribing] = useState(false)
+
+  const handleSubscribe = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      alert("Push notifications are not supported in this browser.")
+      return
+    }
+
+    setIsSubscribing(true)
+    try {
+      const registration = await navigator.serviceWorker.ready
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: "BEl6mS7SshGOnOT9u79Z5SRp7V_5A8p1f-4kLh-U8_FjW-A6-q_Y8u_4_8_8_8_8_8_8_8_8_8_8_8_8" // Replace with real VAPID key in production
+      })
+
+      const result = await savePushSubscription(JSON.stringify(subscription))
+      if (result.success) {
+        alert("Successfully subscribed to push notifications!")
+      } else {
+        alert("Failed to save subscription.")
+      }
+    } catch (error) {
+      console.error("Subscription error:", error)
+      alert("Error subscribing to notifications.")
+    } finally {
+      setIsSubscribing(false)
+    }
+  }
 
   return (
     <form action={formAction} className="space-y-6">
@@ -64,6 +94,23 @@ export function NotificationsForm({ user }: { user: User }) {
             checked={pushNotifications}
             onCheckedChange={setPushNotifications}
           />
+        </div>
+
+        <div className="flex items-center justify-between p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+          <div>
+            <Label className="block text-indigo-300 font-bold">Browser Push Notifications</Label>
+            <p className="text-sm text-indigo-300/80">Allow this device to receive instant task alerts</p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleSubscribe}
+            disabled={isSubscribing}
+            className="border-indigo-500/50 text-indigo-400 hover:bg-indigo-500/20"
+          >
+            {isSubscribing ? "Subscribing..." : "Enable on this device"}
+          </Button>
         </div>
 
         <Separator />

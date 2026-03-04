@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { createTask } from "@/app/actions/task-actions"
 import { format } from "date-fns"
 import { getTasks } from "@/app/actions/task-actions"
+import { UserMultiSelect } from "@/components/user-multi-select"
 
 // Add userId as an optional prop
 interface TaskFormProps {
@@ -36,6 +37,7 @@ export function TaskForm({ userId }: TaskFormProps) {
     category: "Work",
     customCategory: "",
     priority: "medium" as "low" | "medium" | "high",
+    sharedWith: "",
   })
 
   // Fetch existing categories from tasks
@@ -114,6 +116,12 @@ export function TaskForm({ userId }: TaskFormProps) {
       formDataObj.append("category", categoryToUse)
       formDataObj.append("priority", formData.priority)
 
+      // Parse comma separated usernames for the multiplayer feature
+      if (formData.sharedWith.trim()) {
+        const usernames = formData.sharedWith.split(',').map(u => u.trim()).filter(u => u)
+        formDataObj.append("sharedWith", JSON.stringify(usernames))
+      }
+
       // Add userId if provided
       if (userId) {
         formDataObj.append("userId", userId)
@@ -134,6 +142,7 @@ export function TaskForm({ userId }: TaskFormProps) {
         category: "Work",
         customCategory: "",
         priority: "medium",
+        sharedWith: "",
       })
       setIsCustomCategory(false)
 
@@ -161,6 +170,7 @@ export function TaskForm({ userId }: TaskFormProps) {
               category: "Work",
               customCategory: "",
               priority: "medium",
+              sharedWith: "",
             })
             setIsCustomCategory(false)
             setError(null)
@@ -169,30 +179,31 @@ export function TaskForm({ userId }: TaskFormProps) {
           Add New Task
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] glass-panel text-white border-white/20">
         <DialogHeader>
-          <DialogTitle>Create New Task</DialogTitle>
+          <DialogTitle className="text-xl font-bold drop-shadow-md">Create New Task</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-4">
           <div className="space-y-2">
-            <Label htmlFor="title">Title</Label>
-            <Input id="title" name="title" value={formData.title} onChange={handleChange} required />
+            <Label htmlFor="title" className="text-white/80">Title</Label>
+            <Input id="title" name="title" value={formData.title} onChange={handleChange} required className="glass-input" />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor="description" className="text-white/80">Description</Label>
             <Textarea
               id="description"
               name="description"
               value={formData.description}
               onChange={handleChange}
               rows={3}
+              className="glass-input resize-none"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="dueDate">Due Date</Label>
+              <Label htmlFor="dueDate" className="text-white/80">Due Date</Label>
               <Input
                 id="dueDate"
                 name="dueDate"
@@ -200,11 +211,12 @@ export function TaskForm({ userId }: TaskFormProps) {
                 value={formData.dueDate}
                 onChange={handleChange}
                 required
+                className="glass-input" style={{ colorScheme: "dark" }}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="dueTime">Due Time</Label>
+              <Label htmlFor="dueTime" className="text-white/80">Due Time</Label>
               <Input
                 id="dueTime"
                 name="dueTime"
@@ -212,17 +224,18 @@ export function TaskForm({ userId }: TaskFormProps) {
                 value={formData.dueTime}
                 onChange={handleChange}
                 required
+                className="glass-input" style={{ colorScheme: "dark" }}
               />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
+            <Label htmlFor="category" className="text-white/80">Category</Label>
             <Select value={formData.category} onValueChange={(value) => handleSelectChange("category", value)}>
-              <SelectTrigger>
+              <SelectTrigger className="glass-input">
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="glass-card text-white border-white/20">
                 {existingCategories.map((category) => (
                   <SelectItem key={category} value={category}>
                     {category}
@@ -235,7 +248,7 @@ export function TaskForm({ userId }: TaskFormProps) {
 
           {isCustomCategory && (
             <div className="space-y-2">
-              <Label htmlFor="customCategory">Custom Category</Label>
+              <Label htmlFor="customCategory" className="text-white/80">Custom Category</Label>
               <Input
                 id="customCategory"
                 name="customCategory"
@@ -243,45 +256,55 @@ export function TaskForm({ userId }: TaskFormProps) {
                 onChange={handleChange}
                 placeholder="Enter custom category"
                 required={isCustomCategory}
+                className="glass-input"
               />
             </div>
           )}
 
           <div className="space-y-2">
-            <Label>Priority</Label>
+            <Label htmlFor="sharedWith" className="text-white/80">Share with (Search users)</Label>
+            <UserMultiSelect
+              value={formData.sharedWith}
+              onChange={(val) => setFormData({ ...formData, sharedWith: val })}
+              placeholder="Search by name or email..."
+            />
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <Label className="text-white/80">Priority</Label>
             <RadioGroup
               value={formData.priority}
               onValueChange={(value) => handleSelectChange("priority", value)}
-              className="flex space-x-4"
+              className="flex space-x-6"
             >
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="low" id="low" />
-                <Label htmlFor="low" className="text-green-600">
+                <RadioGroupItem value="low" id="low" className="border-emerald-400 text-emerald-400" />
+                <Label htmlFor="low" className="text-emerald-300 cursor-pointer">
                   Low
                 </Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="medium" id="medium" />
-                <Label htmlFor="medium" className="text-yellow-600">
+                <RadioGroupItem value="medium" id="medium" className="border-amber-400 text-amber-400" />
+                <Label htmlFor="medium" className="text-amber-300 cursor-pointer">
                   Medium
                 </Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="high" id="high" />
-                <Label htmlFor="high" className="text-red-600">
+                <RadioGroupItem value="high" id="high" className="border-red-400 text-red-400" />
+                <Label htmlFor="high" className="text-red-300 cursor-pointer">
                   High
                 </Label>
               </div>
             </RadioGroup>
           </div>
 
-          {error && <div className="text-sm text-red-500">{error}</div>}
+          {error && <div className="text-sm text-red-400 p-2 bg-red-900/20 border border-red-500/20 rounded-md">{error}</div>}
 
-          <div className="flex justify-end space-x-2 pt-4">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+          <div className="flex justify-end space-x-3 pt-6 border-t border-white/10 mt-6">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} className="border-white/20 text-white hover:bg-white/10 bg-transparent">
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.5)] border-none">
               {isSubmitting ? "Creating..." : "Create Task"}
             </Button>
           </div>

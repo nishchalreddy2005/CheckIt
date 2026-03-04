@@ -141,7 +141,7 @@ export function TaskExportImport({ tasks, onImportComplete }: TaskExportImportPr
         <Button
           variant="outline"
           size="sm"
-          className="flex items-center gap-1"
+          className="flex items-center gap-1 border-white/20 text-white/80 hover:bg-white/10 hover:text-white bg-transparent"
           onClick={handleExport}
           disabled={tasks.length === 0}
         >
@@ -151,50 +151,50 @@ export function TaskExportImport({ tasks, onImportComplete }: TaskExportImportPr
 
         <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="flex items-center gap-1">
+            <Button variant="outline" size="sm" className="flex items-center gap-1 border-white/20 text-white/80 hover:bg-white/10 hover:text-white bg-transparent">
               <Upload className="h-4 w-4" />
               Import
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="glass-panel border-white/20 text-white">
             <DialogHeader>
-              <DialogTitle>Import Tasks</DialogTitle>
+              <DialogTitle className="text-white/90">Import Tasks</DialogTitle>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-white/60">
                   Select a JSON file containing tasks to import. The file should contain an array of task objects.
                 </p>
 
-                <Input type="file" accept=".json" onChange={handleFileChange} className="cursor-pointer" />
+                <Input type="file" accept=".json" onChange={handleFileChange} className="cursor-pointer glass-input text-white/80 file:text-white file:bg-white/10 file:border-0 hover:file:bg-white/20 file:mr-4 file:py-1 file:px-3 file:rounded-md transition-colors" />
               </div>
 
               {importError && (
-                <Alert variant="destructive">
+                <Alert variant="destructive" className="bg-pink-500/10 border-pink-500/30 text-pink-200">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>{importError}</AlertDescription>
                 </Alert>
               )}
 
               {importSuccess && (
-                <Alert variant="default" className="bg-green-50 border-green-200">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <AlertDescription className="text-green-600">{importSuccess}</AlertDescription>
+                <Alert variant="default" className="bg-emerald-500/10 border-emerald-500/30 text-emerald-200 backdrop-blur-md">
+                  <Check className="h-4 w-4 text-emerald-400" />
+                  <AlertDescription className="text-emerald-200">{importSuccess}</AlertDescription>
                 </Alert>
               )}
 
               {importedTasks.length > 0 && (
                 <div className="text-sm">
-                  <p className="font-medium">Preview:</p>
-                  <ul className="mt-2 max-h-40 overflow-y-auto border rounded-md p-2">
+                  <p className="font-medium text-white/80">Preview:</p>
+                  <ul className="mt-2 max-h-40 overflow-y-auto border border-white/10 rounded-md p-2 bg-black/20">
                     {importedTasks.slice(0, 5).map((task, index) => (
-                      <li key={index} className="py-1 border-b last:border-0">
+                      <li key={index} className="py-1 border-b border-white/5 last:border-0 text-white/80">
                         {task.title} - {task.category} ({task.priority})
                       </li>
                     ))}
                     {importedTasks.length > 5 && (
-                      <li className="py-1 text-muted-foreground">...and {importedTasks.length - 5} more</li>
+                      <li className="py-1 text-white/50">...and {importedTasks.length - 5} more</li>
                     )}
                   </ul>
                 </div>
@@ -202,10 +202,10 @@ export function TaskExportImport({ tasks, onImportComplete }: TaskExportImportPr
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+              <Button variant="outline" onClick={() => setImportDialogOpen(false)} className="border-white/20 text-white hover:bg-white/10 bg-transparent">
                 Cancel
               </Button>
-              <Button onClick={() => setConfirmDialogOpen(true)} disabled={importedTasks.length === 0 || !!importError}>
+              <Button onClick={() => setConfirmDialogOpen(true)} disabled={importedTasks.length === 0 || !!importError} className="bg-indigo-600 hover:bg-indigo-500 text-white border-none shadow-[0_0_15px_rgba(79,70,229,0.4)]">
                 Import Tasks
               </Button>
             </DialogFooter>
@@ -213,17 +213,17 @@ export function TaskExportImport({ tasks, onImportComplete }: TaskExportImportPr
         </Dialog>
 
         <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
-          <AlertDialogContent>
+          <AlertDialogContent className="glass-panel border-white/20 text-white">
             <AlertDialogHeader>
-              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-              <AlertDialogDescription>
+              <AlertDialogTitle className="text-white/90">Are you sure?</AlertDialogTitle>
+              <AlertDialogDescription className="text-white/70">
                 This will import {importedTasks.length} tasks. Duplicate tasks may be created if they have the same
                 title and due date.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleImportConfirm} disabled={isImporting}>
+              <AlertDialogCancel className="bg-transparent text-white border-white/20 hover:bg-white/10 hover:text-white">Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleImportConfirm} disabled={isImporting} className="bg-indigo-600 hover:bg-indigo-500 text-white border-none shadow-[0_0_15px_rgba(79,70,229,0.4)]">
                 {isImporting ? "Importing..." : "Import"}
               </AlertDialogAction>
             </AlertDialogFooter>

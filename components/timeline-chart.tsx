@@ -36,6 +36,7 @@ export function TimelineChart({
   const tasksByDate = dates.map((date) => {
     const dateStr = formatDateForComparison(date)
     const tasksOnDate = tasks.filter((task) => {
+      if (!task.dueDate) return false
       // Normalize the task due date format for comparison
       const taskDueDate = new Date(task.dueDate)
       const taskDueDateStr = formatDateForComparison(taskDueDate)

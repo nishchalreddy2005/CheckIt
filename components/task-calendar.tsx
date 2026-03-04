@@ -27,6 +27,7 @@ export function TaskCalendar({ tasks }: TaskCalendarProps) {
 
   const getTasksForDate = (date: Date) => {
     return tasks.filter((task) => {
+      if (!task.dueDate) return false
       const taskDate = new Date(task.dueDate)
       return isSameDay(taskDate, date)
     })
@@ -77,9 +78,8 @@ export function TaskCalendar({ tasks }: TaskCalendarProps) {
             <Dialog key={day.toString()}>
               <DialogTrigger asChild>
                 <div
-                  className={`h-24 border rounded-md p-1 cursor-pointer transition-colors hover:bg-accent/50 ${
-                    isToday ? "border-primary border-2" : ""
-                  } ${isSelected ? "bg-accent" : ""}`}
+                  className={`h-24 border rounded-md p-1 cursor-pointer transition-colors hover:bg-accent/50 ${isToday ? "border-primary border-2" : ""
+                    } ${isSelected ? "bg-accent" : ""}`}
                   onClick={() => setSelectedDate(day)}
                 >
                   <div className="flex flex-col h-full">
@@ -104,7 +104,7 @@ export function TaskCalendar({ tasks }: TaskCalendarProps) {
                   </div>
                 </div>
               </DialogTrigger>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-md glass-panel border-white/20 text-white">
                 <DialogHeader>
                   <DialogTitle>Tasks for {format(day, "MMMM d, yyyy")}</DialogTitle>
                 </DialogHeader>
@@ -116,13 +116,12 @@ export function TaskCalendar({ tasks }: TaskCalendarProps) {
                       tasksForDay.map((task) => (
                         <Card
                           key={task.id}
-                          className={`${
-                            task.priority === "high"
-                              ? "border-l-4 border-l-red-500"
-                              : task.priority === "medium"
-                                ? "border-l-4 border-l-orange-500"
-                                : "border-l-4 border-l-green-500"
-                          }`}
+                          className={`${task.priority === "high"
+                            ? "border-l-4 border-l-red-500"
+                            : task.priority === "medium"
+                              ? "border-l-4 border-l-orange-500"
+                              : "border-l-4 border-l-green-500"
+                            }`}
                         >
                           <CardContent className="p-3">
                             <div className="flex items-start justify-between">

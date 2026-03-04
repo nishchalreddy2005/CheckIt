@@ -28,7 +28,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { toast } from "@/components/ui/use-toast"
 import { LogoutButton } from "@/components/logout-button"
-import { getCurrentUser, getAllUsers, deleteUser, updateUser } from "@/app/actions/user-actions"
+import { getCurrentUser, getAllUsers, deleteUser, updateUser, suspendUser, unsuspendUser, hardDeleteUser, forceDisable2FA, getGlobalStats, exportSystemData, getDetailedSystemHealth } from "@/app/actions/user-actions"
+import { getSystemSettings, updateSystemSettings } from "@/app/actions/system-actions"
 import {
   getAllAdmins,
   deleteAdmin,
@@ -40,23 +41,28 @@ import {
   updateAdminSecretCode,
   getAdminSecretCode,
 } from "@/app/actions/admin-actions"
+import { getAuditLogs } from "@/app/actions/audit-actions"
 
 export default function SuperadminDashboard() {
   const router = useRouter()
-  const [user, setUser] = useState(null)
-  const [users, setUsers] = useState([])
-  const [admins, setAdmins] = useState([])
-  const [pendingAdmins, setPendingAdmins] = useState([])
+  const [user, setUser] = useState<any>(null)
+  const [users, setUsers] = useState<any[]>([])
+  const [admins, setAdmins] = useState<any[]>([])
+  const [pendingAdmins, setPendingAdmins] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [globalStats, setGlobalStats] = useState<any>(null)
+  const [detailedHealth, setDetailedHealth] = useState<any>(null)
+  const [systemSettings, setSystemSettings] = useState({ maintenance_mode: "false", global_announcement: "" })
   const [adminSecretCode, setAdminSecretCode] = useState("")
   const [newSecretCode, setNewSecretCode] = useState("")
-  const [editingUser, setEditingUser] = useState(null)
-  const [editingAdmin, setEditingAdmin] = useState(null)
+  const [editingUser, setEditingUser] = useState<any>(null)
+  const [editingAdmin, setEditingAdmin] = useState<any>(null)
   const [newAdmin, setNewAdmin] = useState({
     name: "",
     email: "",
     password: "",
   })
+  const [auditLogs, setAuditLogs] = useState<any[]>([])
 
   const fetchData = async () => {
     try {
@@ -72,6 +78,17 @@ export default function SuperadminDashboard() {
       // Fetch users
       const allUsers = await getAllUsers()
       setUsers(allUsers || [])
+
+      // Fetch global stats & health
+      const [stats, healthData, settingsData] = await Promise.all([
+        getGlobalStats(),
+        getDetailedSystemHealth(),
+        getSystemSettings()
+      ])
+
+      setGlobalStats(stats)
+      if (healthData?.success) setDetailedHealth(healthData.stats)
+      if (settingsData?.success) setSystemSettings(settingsData.settings as any)
 
       // Fetch admins
       const allAdmins = await getAllAdmins()
@@ -93,6 +110,9 @@ export default function SuperadminDashboard() {
         description: "Failed to load data. Please try again.",
         variant: "destructive",
       })
+      // Fetch audit logs
+      const logs = await getAuditLogs()
+      setAuditLogs(logs || [])
     } finally {
       setLoading(false)
     }
@@ -169,7 +189,7 @@ export default function SuperadminDashboard() {
   }
 
   // Handle admin approval
-  const handleApproveAdmin = async (adminId) => {
+  const handleApproveAdmin = async (adminId: any) => {
     try {
       const result = await approveAdmin(adminId)
       if (result.success) {
@@ -196,7 +216,7 @@ export default function SuperadminDashboard() {
   }
 
   // Handle admin rejection
-  const handleRejectAdmin = async (adminId) => {
+  const handleRejectAdmin = async (adminId: any) => {
     try {
       const result = await rejectAdmin(adminId)
       if (result.success) {
@@ -223,7 +243,7 @@ export default function SuperadminDashboard() {
   }
 
   // Handle admin deletion
-  const handleDeleteAdmin = async (adminId) => {
+  const handleDeleteAdmin = async (adminId: any) => {
     try {
       await deleteAdmin(adminId)
       fetchData()
@@ -242,7 +262,7 @@ export default function SuperadminDashboard() {
   }
 
   // Handle user deletion
-  const handleDeleteUser = async (userId) => {
+  const handleDeleteUser = async (userId: any) => {
     try {
       await deleteUser(userId)
       fetchData()
@@ -265,7 +285,7 @@ export default function SuperadminDashboard() {
     if (!editingAdmin) return
 
     try {
-      const adminData = {
+      const adminData: Record<string, any> = {
         name: editingAdmin.name,
         email: editingAdmin.email,
       }
@@ -288,6 +308,41 @@ export default function SuperadminDashboard() {
         description: "Failed to update admin",
         variant: "destructive",
       })
+    }
+  }
+
+  const handleExportData = async () => {
+    try {
+      const result = await exportSystemData()
+      if (result.success && result.data) {
+        const blob = new Blob([result.data], { type: 'text/csv' })
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `checkit_export_${new Date().toISOString().split('T')[0]}.csv`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+        toast({ title: "Success", description: "Data exported successfully" })
+      } else {
+        toast({ title: "Error", description: result.message || "Failed to export data", variant: "destructive" })
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to export data", variant: "destructive" })
+    }
+  }
+
+  const handleUpdateSettings = async () => {
+    try {
+      const result = await updateSystemSettings(systemSettings as Record<string, string>)
+      if (result.success) {
+        toast({ title: "Success", description: "System settings updated successfully" })
+      } else {
+        toast({ title: "Error", description: result.message || "Failed to update settings", variant: "destructive" })
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to update settings", variant: "destructive" })
     }
   }
 
@@ -318,11 +373,43 @@ export default function SuperadminDashboard() {
       <main className="flex-1 container py-6">
         <Tabs defaultValue="pending">
           <TabsList className="mb-4">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="pending">Pending Admin Requests</TabsTrigger>
             <TabsTrigger value="admins">Admin Management</TabsTrigger>
             <TabsTrigger value="users">User Management</TabsTrigger>
+            <TabsTrigger value="audit">Audit Logs</TabsTrigger>
+            <TabsTrigger value="health">System Health</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="overview">
+            <div className="grid gap-4 md:grid-cols-3 mb-8">
+              <Card className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border-indigo-500/20">
+                <CardHeader>
+                  <CardTitle className="text-xl">Total Users</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-4xl font-bold text-indigo-400">{globalStats?.totalUsers || 0}</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20">
+                <CardHeader>
+                  <CardTitle className="text-xl">Total Tasks</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-4xl font-bold text-purple-400">{globalStats?.totalTasks || 0}</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border-emerald-500/20">
+                <CardHeader>
+                  <CardTitle className="text-xl">Active Sessions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-4xl font-bold text-emerald-400">{globalStats?.totalActiveSessions || 0}</p>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
 
           <TabsContent value="pending">
             <Card>
@@ -451,28 +538,87 @@ export default function SuperadminDashboard() {
                               >
                                 Edit
                               </Button>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="destructive" size="sm">
-                                    Delete
-                                  </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      This will permanently delete the admin account.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleDeleteAdmin(admin.id)}>
+                              {admin.id !== user?.id && (
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button variant="destructive" size="sm">
                                       Delete
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This will permanently delete the admin account.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction onClick={() => handleDeleteAdmin(admin.id)}>
+                                        Delete
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              )}
+                              {admin.id === user?.id && (
+                                <span className="text-xs font-medium px-2 py-1 bg-indigo-500/10 text-indigo-400 rounded-full border border-indigo-500/20">
+                                  You (Protected)
+                                </span>
+                              )}
                             </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="audit">
+            <Card>
+              <CardHeader>
+                <CardTitle>System Audit Logs</CardTitle>
+                <CardDescription>Live trail of administrative actions and system updates</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {auditLogs.length === 0 ? (
+                  <div className="text-center py-6">
+                    <p className="text-muted-foreground">No audit logs found</p>
+                  </div>
+                ) : (
+                  <div className="rounded-md border overflow-x-auto">
+                    <table className="min-w-full divide-y divide-border">
+                      <thead>
+                        <tr className="bg-muted/50">
+                          <th className="px-4 py-3 text-left text-sm font-medium">Timestamp</th>
+                          <th className="px-4 py-3 text-left text-sm font-medium">Admin</th>
+                          <th className="px-4 py-3 text-left text-sm font-medium">Action</th>
+                          <th className="px-4 py-3 text-left text-sm font-medium">Details</th>
+                          <th className="px-4 py-3 text-left text-sm font-medium">IP Address</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {auditLogs.map((log) => (
+                          <tr key={log.id} className="hover:bg-muted/30 transition-colors">
+                            <td className="px-4 py-3 text-sm whitespace-nowrap">
+                              {new Date(log.timestamp).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-sm font-medium">{log.adminName}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${log.action.includes('Delete') ? 'bg-red-500/10 text-red-500' :
+                                log.action.includes('Approve') ? 'bg-emerald-500/10 text-emerald-500' :
+                                  'bg-indigo-500/10 text-indigo-500'
+                                }`}>
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-muted-foreground max-w-xs truncate">
+                              {log.details || "-"}
+                            </td>
+                            <td className="px-4 py-3 font-mono text-xs">{log.ipAddress}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -502,6 +648,8 @@ export default function SuperadminDashboard() {
                           <th className="px-4 py-3 text-left text-sm font-medium">Name</th>
                           <th className="px-4 py-3 text-left text-sm font-medium">Email</th>
                           <th className="px-4 py-3 text-left text-sm font-medium">Created</th>
+                          <th className="px-4 py-3 text-left text-sm font-medium">Last Login</th>
+                          <th className="px-4 py-3 text-left text-sm font-medium">Failed Logins</th>
                           <th className="px-4 py-3 text-right text-sm font-medium">Actions</th>
                         </tr>
                       </thead>
@@ -513,37 +661,99 @@ export default function SuperadminDashboard() {
                             <td className="px-4 py-3 text-sm">
                               {new Date(Number(user.createdAt)).toLocaleDateString()}
                             </td>
+                            <td className="px-4 py-3 text-sm text-muted-foreground">
+                              {user.lastLogin ? new Date(Number(user.lastLogin)).toLocaleDateString() : "Never"}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-center">
+                              {user.failedLoginAttempts > 0 ? <span className="text-destructive font-medium">{user.failedLoginAttempts}</span> : <span className="text-muted-foreground">0</span>}
+                            </td>
                             <td className="px-4 py-3 text-sm text-right">
                               <Button variant="outline" size="sm" className="mr-2" onClick={() => setEditingUser(user)}>
                                 Edit
                               </Button>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="destructive" size="sm">
-                                    Delete
-                                  </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      This will permanently delete the user account.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleDeleteUser(user.id)}>
+                              {user.id !== user?.id && (
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button variant="destructive" size="sm">
                                       Delete
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This will permanently delete the user account.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction onClick={() => handleDeleteUser(user.id)}>
+                                        Delete
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              )}
+                              {user.id === user?.id && (
+                                <span className="text-xs font-medium px-2 py-1 bg-indigo-500/10 text-indigo-400 rounded-full border border-indigo-500/20">
+                                  You (Protected)
+                                </span>
+                              )}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="health">
+            <Card>
+              <CardHeader>
+                <CardTitle>Detailed System Health</CardTitle>
+                <CardDescription>Live metrics of database usage and system stability</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {detailedHealth ? (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                      <h4 className="text-sm font-medium text-muted-foreground">Server Uptime</h4>
+                      <p className="text-2xl font-bold">{Math.floor(detailedHealth.uptime ?? 0 / 60)} mins</p>
+                    </div>
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                      <h4 className="text-sm font-medium text-muted-foreground">Active Sessions</h4>
+                      <p className="text-2xl font-bold">{detailedHealth.activeSessions}</p>
+                    </div>
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                      <h4 className="text-sm font-medium text-muted-foreground">Superadmins</h4>
+                      <p className="text-2xl font-bold">{detailedHealth.superadmins}</p>
+                    </div>
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                      <h4 className="text-sm font-medium text-muted-foreground">Standard Admins</h4>
+                      <p className="text-2xl font-bold">{detailedHealth.admins}</p>
+                    </div>
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                      <h4 className="text-sm font-medium text-muted-foreground">Suspended Users</h4>
+                      <p className="text-2xl font-bold text-destructive">{detailedHealth.suspendedUsers}</p>
+                    </div>
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                      <h4 className="text-sm font-medium text-muted-foreground">Completed Tasks</h4>
+                      <p className="text-2xl font-bold text-emerald-500">{detailedHealth.completedTasks}</p>
+                    </div>
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                      <h4 className="text-sm font-medium text-muted-foreground">Total Users</h4>
+                      <p className="text-2xl font-bold text-indigo-500">{detailedHealth.totalUsers}</p>
+                    </div>
+                    <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                      <h4 className="text-sm font-medium text-muted-foreground">Total Tasks</h4>
+                      <p className="text-2xl font-bold text-purple-500">{detailedHealth.totalTasks}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">Real-time metrics unavailable.</p>
                 )}
               </CardContent>
             </Card>
@@ -556,7 +766,7 @@ export default function SuperadminDashboard() {
                 <CardDescription>Manage system-wide settings</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
+                <div className="space-y-6">
                   <div>
                     <h3 className="text-lg font-medium">Admin Registration Secret Code</h3>
                     <p className="text-sm text-muted-foreground mb-4">This code is required for admin registration</p>
@@ -573,6 +783,42 @@ export default function SuperadminDashboard() {
                         <Button onClick={handleUpdateSecretCode}>Update</Button>
                       </div>
                     </div>
+                  </div>
+
+                  <div className="pt-4 border-t">
+                    <h3 className="text-lg font-medium mb-4">Global Preferences</h3>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label htmlFor="maintenance-mode">Maintenance Mode</Label>
+                          <p className="text-sm text-muted-foreground">Locks out non-admin users from accessing the application</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          id="maintenance-mode"
+                          className="h-6 w-6"
+                          checked={systemSettings?.maintenance_mode === "true"}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, maintenance_mode: e.target.checked ? "true" : "false" })}
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="global-announcement">Global Announcement</Label>
+                        <Input
+                          id="global-announcement"
+                          placeholder="Display a banner to all users..."
+                          value={systemSettings?.global_announcement || ""}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, global_announcement: e.target.value })}
+                        />
+                      </div>
+
+                      <Button onClick={handleUpdateSettings}>Save Global Preferences</Button>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t">
+                    <h3 className="text-lg font-medium mb-4">Data Management</h3>
+                    <Button variant="outline" onClick={handleExportData}>Export Users & Tasks (CSV)</Button>
                   </div>
                 </div>
               </CardContent>
@@ -617,11 +863,71 @@ export default function SuperadminDashboard() {
                 />
               </div>
             </div>
+
+            <div className="border-t pt-4 mt-2">
+              <h4 className="text-sm font-medium text-destructive mb-3">Advanced Danger Zone</h4>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant={editingUser.isSuspended ? "outline" : "secondary"}
+                  className={editingUser.isSuspended ? "border-emerald-500 text-emerald-500" : "bg-orange-500/20 text-orange-500 hover:bg-orange-500/30"}
+                  onClick={async () => {
+                    const action = editingUser.isSuspended ? unsuspendUser(editingUser.id) : suspendUser(editingUser.id);
+                    const res = await action;
+                    if (res.success) {
+                      toast({ title: "Success", description: res.message });
+                      fetchData();
+                      setEditingUser(null);
+                    } else {
+                      toast({ title: "Error", description: res.message, variant: "destructive" });
+                    }
+                  }}
+                >
+                  {editingUser.isSuspended ? "Unsuspend User" : "Suspend User (Lock & Kick)"}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                  onClick={async () => {
+                    const res = await forceDisable2FA(editingUser.id);
+                    if (res.success) {
+                      toast({ title: "Success", description: res.message });
+                      fetchData();
+                    } else {
+                      toast({ title: "Error", description: res.message, variant: "destructive" });
+                    }
+                  }}
+                >
+                  Force Disable 2FA
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={async () => {
+                    if (confirm("Are you ABSOLUTELY sure? This wipes all tasks, sessions, and data for this user forever!")) {
+                      const res = await hardDeleteUser(editingUser.id);
+                      if (res.success) {
+                        toast({ title: "Wiped", description: res.message });
+                        fetchData();
+                        setEditingUser(null);
+                      } else {
+                        toast({ title: "Error", description: res.message, variant: "destructive" });
+                      }
+                    }
+                  }}
+                >
+                  Hard Wipe User Data
+                </Button>
+              </div>
+            </div>
             <DialogFooter>
               <Button
                 onClick={async () => {
                   try {
-                    const userData = {
+                    const userData: Record<string, any> = {
                       name: editingUser.name,
                       email: editingUser.email,
                     }

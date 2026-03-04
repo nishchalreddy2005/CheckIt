@@ -61,7 +61,7 @@ export function TaskStatisticsDashboard({ tasks }: TaskStatisticsDashboardProps)
         newStats.pending++
 
         // Check if overdue
-        const dueDate = new Date(task.dueDate)
+        const dueDate = new Date(task.dueDate || new Date())
         dueDate.setHours(0, 0, 0, 0)
 
         if (dueDate < today) {
@@ -74,16 +74,17 @@ export function TaskStatisticsDashboard({ tasks }: TaskStatisticsDashboardProps)
       }
 
       // Count by category
-      if (!newStats.categories[task.category]) {
-        newStats.categories[task.category] = { total: 0, completed: 0 }
+      const category = task.category || "Uncategorized"
+      if (!newStats.categories[category]) {
+        newStats.categories[category] = { total: 0, completed: 0 }
       }
-      newStats.categories[task.category].total++
+      newStats.categories[category].total++
       if (task.completed) {
-        newStats.categories[task.category].completed++
+        newStats.categories[category].completed++
       }
 
       // Count by priority
-      if (task.priority in newStats.priorities) {
+      if (task.priority && task.priority in newStats.priorities) {
         newStats.priorities[task.priority as keyof typeof newStats.priorities]++
       }
     })
@@ -98,87 +99,87 @@ export function TaskStatisticsDashboard({ tasks }: TaskStatisticsDashboardProps)
     <div className="space-y-4">
       <div className="flex flex-col space-y-4">
         {/* Total Tasks Card */}
-        <Card className="w-full">
+        <Card className="w-full glass-card border-none">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Total Tasks</p>
-                <h3 className="text-2xl font-bold">{stats.total}</h3>
+                <p className="text-sm font-medium text-white/60">Total Tasks</p>
+                <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-indigo-500">{stats.total}</h3>
               </div>
-              <div className="rounded-full bg-primary/10 p-2">
-                <BarChart3 className="h-4 w-4 text-primary" />
+              <div className="rounded-2xl bg-indigo-500/20 p-3 shadow-[0_0_15px_rgba(99,102,241,0.3)]">
+                <BarChart3 className="h-5 w-5 text-indigo-400" />
               </div>
             </div>
-            <div className="mt-3 flex items-center text-xs">
+            <div className="mt-4 flex items-center text-xs">
               <div className="flex items-center">
-                <div className="mr-1 h-2 w-2 rounded-full bg-green-500"></div>
-                <span className="text-muted-foreground">Completed: {stats.completed}</span>
+                <div className="mr-2 h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
+                <span className="text-white/70">Completed: {stats.completed}</span>
               </div>
-              <div className="ml-3 flex items-center">
-                <div className="mr-1 h-2 w-2 rounded-full bg-blue-500"></div>
-                <span className="text-muted-foreground">Pending: {stats.pending}</span>
+              <div className="ml-4 flex items-center">
+                <div className="mr-2 h-2.5 w-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]"></div>
+                <span className="text-white/70">Pending: {stats.pending}</span>
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Completion Rate Card */}
-        <Card className="w-full">
+        <Card className="w-full glass-card border-none">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Completion Rate</p>
-                <h3 className="text-2xl font-bold">{completionPercentage}%</h3>
+                <p className="text-sm font-medium text-white/60">Completion Rate</p>
+                <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 to-emerald-500">{completionPercentage}%</h3>
               </div>
-              <div className="rounded-full bg-green-100 p-2">
-                <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <div className="rounded-2xl bg-emerald-500/20 p-3 shadow-[0_0_15px_rgba(52,211,153,0.3)]">
+                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
               </div>
             </div>
-            <div className="mt-3 h-2 w-full rounded-full bg-gray-200">
-              <div className="h-2 rounded-full bg-green-500" style={{ width: `${completionPercentage}%` }}></div>
+            <div className="mt-4 h-2 w-full rounded-full bg-black/40 border border-white/5">
+              <div className="h-full rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]" style={{ width: `${completionPercentage}%` }}></div>
             </div>
           </CardContent>
         </Card>
 
         {/* Due Soon Card */}
-        <Card className="w-full">
+        <Card className="w-full glass-card border-none">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Due Soon</p>
-                <h3 className="text-2xl font-bold">{stats.dueToday + stats.dueTomorrow}</h3>
+                <p className="text-sm font-medium text-white/60">Due Soon</p>
+                <h3 className="text-3xl font-extrabold text-white drop-shadow-md">{stats.dueToday + stats.dueTomorrow}</h3>
               </div>
-              <div className="rounded-full bg-yellow-100 p-2">
-                <Clock className="h-4 w-4 text-yellow-600" />
+              <div className="rounded-2xl bg-amber-500/20 p-3 shadow-[0_0_15px_rgba(251,191,36,0.3)]">
+                <Clock className="h-5 w-5 text-amber-400" />
               </div>
             </div>
-            <div className="mt-3 flex items-center text-xs">
+            <div className="mt-4 flex items-center text-xs">
               <div className="flex items-center">
-                <div className="mr-1 h-2 w-2 rounded-full bg-orange-500"></div>
-                <span className="text-muted-foreground">Today: {stats.dueToday}</span>
+                <div className="mr-2 h-2.5 w-2.5 rounded-full bg-orange-400 shadow-[0_0_8px_rgba(2fb,146, ৬০,0.8)]"></div>
+                <span className="text-white/70">Today: {stats.dueToday}</span>
               </div>
-              <div className="ml-3 flex items-center">
-                <div className="mr-1 h-2 w-2 rounded-full bg-yellow-500"></div>
-                <span className="text-muted-foreground">Tomorrow: {stats.dueTomorrow}</span>
+              <div className="ml-4 flex items-center">
+                <div className="mr-2 h-2.5 w-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]"></div>
+                <span className="text-white/70">Tomorrow: {stats.dueTomorrow}</span>
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Overdue Card */}
-        <Card className="w-full">
+        <Card className="w-full glass-card border-none">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Overdue</p>
-                <h3 className="text-2xl font-bold">{stats.overdue}</h3>
+                <p className="text-sm font-medium text-white/60">Overdue</p>
+                <h3 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-pink-500">{stats.overdue}</h3>
               </div>
-              <div className="rounded-full bg-red-100 p-2">
-                <AlertTriangle className="h-4 w-4 text-red-600" />
+              <div className="rounded-2xl bg-red-500/20 p-3 shadow-[0_0_15px_rgba(248,113,113,0.3)]">
+                <AlertTriangle className="h-5 w-5 text-red-400" />
               </div>
             </div>
-            <div className="mt-3 text-xs">
-              <span className="text-muted-foreground">
+            <div className="mt-4 text-xs font-medium">
+              <span className="text-red-300 drop-shadow-sm">
                 {stats.overdue > 0
                   ? `${Math.round((stats.overdue / stats.pending) * 100)}% of pending tasks are overdue`
                   : "No overdue tasks"}
@@ -189,14 +190,14 @@ export function TaskStatisticsDashboard({ tasks }: TaskStatisticsDashboardProps)
       </div>
 
       <Tabs defaultValue="categories">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="categories">Categories</TabsTrigger>
-          <TabsTrigger value="priorities">Priorities</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-2 bg-white/5 border border-white/10 rounded-xl p-1">
+          <TabsTrigger value="categories" className="data-[state=active]:bg-indigo-500/50 data-[state=active]:text-white text-white/60 rounded-lg transition-all">Categories</TabsTrigger>
+          <TabsTrigger value="priorities" className="data-[state=active]:bg-indigo-500/50 data-[state=active]:text-white text-white/60 rounded-lg transition-all">Priorities</TabsTrigger>
         </TabsList>
         <TabsContent value="categories" className="mt-4">
-          <Card>
+          <Card className="glass-card border-none">
             <CardHeader>
-              <CardTitle>Tasks by Category</CardTitle>
+              <CardTitle className="text-white drop-shadow-md">Tasks by Category</CardTitle>
             </CardHeader>
             <CardContent>
               <BarChart
@@ -210,12 +211,12 @@ export function TaskStatisticsDashboard({ tasks }: TaskStatisticsDashboardProps)
           </Card>
         </TabsContent>
         <TabsContent value="priorities" className="mt-4">
-          <Card>
+          <Card className="glass-card border-none">
             <CardHeader>
-              <CardTitle>Tasks by Priority</CardTitle>
+              <CardTitle className="text-white drop-shadow-md">Tasks by Priority</CardTitle>
             </CardHeader>
             <CardContent>
-              <PriorityChart priorities={stats.priorities} />
+              <PriorityChart tasks={tasks} />
             </CardContent>
           </Card>
         </TabsContent>

@@ -8,18 +8,21 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { toast } from "@/components/ui/use-toast"
-import { getAllUsers, deleteUser, updateUser, createUser, getCurrentUser } from "@/app/actions/user-actions"
+import { getAllUsers, deleteUser, updateUser, createUser, getCurrentUser, getGlobalStats, forceInvalidateUserSessions } from "@/app/actions/user-actions"
 import { LogoutButton } from "@/components/logout-button"
 
 export default function AdminPage() {
   const router = useRouter()
-  const [users, setUsers] = useState([])
+  const [users, setUsers] = useState<any[]>([])
+  const [globalStats, setGlobalStats] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [editUser, setEditUser] = useState(null)
+  const [editUser, setEditUser] = useState<any>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [userToDelete, setUserToDelete] = useState(null)
+  const [userToDelete, setUserToDelete] = useState<any>(null)
+  const [loggedInUser, setLoggedInUser] = useState<any>(null)
+  const [searchQuery, setSearchQuery] = useState("")
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -30,6 +33,7 @@ export default function AdminPage() {
     try {
       console.log("Admin page: Checking current user")
       const currentUser = await getCurrentUser()
+      setLoggedInUser(currentUser)
 
       if (!currentUser) {
         console.log("Admin page: No current user found")
@@ -58,6 +62,9 @@ export default function AdminPage() {
         const allUsers = await getAllUsers()
         console.log(`Admin page: Loaded ${allUsers.length} users`)
         setUsers(allUsers)
+
+        const stats = await getGlobalStats()
+        setGlobalStats(stats)
       } catch (usersError) {
         console.error("Admin page: Error loading users:", usersError)
         toast({
@@ -84,7 +91,7 @@ export default function AdminPage() {
     checkAdminAndLoadUsers()
   }, [router])
 
-  const handleEditUser = (user) => {
+  const handleEditUser = (user: any) => {
     setEditUser(user)
     setFormData({
       name: user.name,
@@ -94,7 +101,7 @@ export default function AdminPage() {
     setIsEditDialogOpen(true)
   }
 
-  const handleDeleteUser = (user) => {
+  const handleDeleteUser = (user: any) => {
     setUserToDelete(user)
     setIsDeleteDialogOpen(true)
   }
@@ -108,7 +115,7 @@ export default function AdminPage() {
     setIsAddDialogOpen(true)
   }
 
-  const handleInputChange = (e) => {
+  const handleInputChange = (e: any) => {
     const { name, value } = e.target
     setFormData((prev) => ({
       ...prev,
@@ -116,7 +123,7 @@ export default function AdminPage() {
     }))
   }
 
-  const handleUpdateUser = async (e) => {
+  const handleUpdateUser = async (e: any) => {
     e.preventDefault()
     try {
       const result = await updateUser(editUser.id, formData)
@@ -173,7 +180,7 @@ export default function AdminPage() {
     }
   }
 
-  const handleCreateUser = async (e) => {
+  const handleCreateUser = async (e: any) => {
     e.preventDefault()
     try {
       // Create FormData object for the createUser function
@@ -214,6 +221,36 @@ export default function AdminPage() {
     }
   }
 
+  const handleForceLogout = async (user: any) => {
+    try {
+      const result = await forceInvalidateUserSessions(user.id)
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: "User sessions invalidated successfully.",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: result.message,
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error invalidating user session:", error)
+      toast({
+        title: "Error",
+        description: "Failed to forcefully logout user",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const filteredUsers = users.filter(user =>
+    user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.email.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   if (loading) {
     return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   }
@@ -230,9 +267,44 @@ export default function AdminPage() {
       </header>
       <main className="flex-1 py-6">
         <div className="container px-4 md:px-6">
+          <div className="grid gap-4 md:grid-cols-3 mb-8 mt-2">
+            <Card className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border-indigo-500/20">
+              <CardHeader>
+                <CardTitle className="text-xl">Total Users</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold text-indigo-400">{globalStats?.totalUsers || 0}</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20">
+              <CardHeader>
+                <CardTitle className="text-xl">Total Tasks</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold text-purple-400">{globalStats?.totalTasks || 0}</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border-emerald-500/20">
+              <CardHeader>
+                <CardTitle className="text-xl">Active Sessions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold text-emerald-400">{globalStats?.totalActiveSessions || 0}</p>
+              </CardContent>
+            </Card>
+          </div>
+
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-semibold">User Management</h2>
-            <Button onClick={handleAddUser}>Add User</Button>
+            <div className="flex gap-4 items-center">
+              <Input
+                placeholder="Search users..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-64"
+              />
+              <Button onClick={handleAddUser}>Add User</Button>
+            </div>
           </div>
 
           <Card>
@@ -247,24 +319,45 @@ export default function AdminPage() {
                       <th className="px-4 py-2 text-left">Name</th>
                       <th className="px-4 py-2 text-left">Email</th>
                       <th className="px-4 py-2 text-left">Created At</th>
+                      <th className="px-4 py-2 text-left">Last Login</th>
+                      <th className="px-4 py-2 text-left">Failed Logins</th>
                       <th className="px-4 py-2 text-left">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {users.length > 0 ? (
-                      users.map((user) => (
+                    {filteredUsers.length > 0 ? (
+                      filteredUsers.map((user) => (
                         <tr key={user.id} className="border-b">
                           <td className="px-4 py-2">{user.name}</td>
                           <td className="px-4 py-2">{user.email}</td>
                           <td className="px-4 py-2">{new Date(Number(user.createdAt)).toLocaleDateString()}</td>
+                          <td className="px-4 py-2">{user.lastLogin ? new Date(Number(user.lastLogin)).toLocaleDateString() : "Never"}</td>
+                          <td className="px-4 py-2 text-muted-foreground">{user.failedLoginAttempts || 0}</td>
                           <td className="px-4 py-2">
                             <div className="flex gap-2">
-                              <Button variant="outline" size="sm" onClick={() => handleEditUser(user)}>
-                                Edit
-                              </Button>
-                              <Button variant="destructive" size="sm" onClick={() => handleDeleteUser(user)}>
-                                Delete
-                              </Button>
+                              {(loggedInUser?.isSuperadmin || (!user.isAdmin && !user.isSuperadmin)) && (
+                                <>
+                                  <Button variant="outline" size="sm" onClick={() => handleEditUser(user)}>
+                                    Edit
+                                  </Button>
+                                  <Button variant="destructive" size="sm" onClick={() => handleDeleteUser(user)}>
+                                    Delete
+                                  </Button>
+                                  <Button variant="secondary" size="sm" onClick={() => handleForceLogout(user)}>
+                                    Force Logout
+                                  </Button>
+                                </>
+                              )}
+                              {(user.isAdmin || user.isSuperadmin) && !loggedInUser?.isSuperadmin && (
+                                <span className="text-xs font-medium px-2 py-1 bg-amber-500/10 text-amber-500 rounded-full border border-amber-500/20">
+                                  Protected
+                                </span>
+                              )}
+                              {user.id === loggedInUser?.id && loggedInUser?.isSuperadmin && (
+                                <span className="text-xs font-medium px-2 py-1 bg-indigo-500/10 text-indigo-400 rounded-full border border-indigo-500/20">
+                                  You (Protected)
+                                </span>
+                              )}
                             </div>
                           </td>
                         </tr>

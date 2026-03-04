@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { format } from "date-fns"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2, Plus } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
 export function SimpleTaskForm({ userId }: { userId?: string }) {
   const router = useRouter()
@@ -54,8 +55,10 @@ export function SimpleTaskForm({ userId }: { userId?: string }) {
     setSuccess(null)
 
     try {
-      // Use the API route method for simplicity
-      const dateTimeString = `${formData.dueDate}T${formData.dueTime}:00`
+      // Use the API route method for simplicity (Ensure it's a valid local ISO string format)
+      // e.g. "2024-03-10T14:30"
+      const timePart = formData.dueTime ? formData.dueTime : "09:00"
+      const dateTimeString = `${formData.dueDate}T${timePart}`
 
       const category = isCustomCategory ? formData.customCategory : formData.category
 
@@ -105,28 +108,23 @@ export function SimpleTaskForm({ userId }: { userId?: string }) {
     }
   }
 
-  if (!isOpen) {
-    return (
-      <Button onClick={() => setIsOpen(true)} className="flex items-center gap-2">
-        <Plus className="h-4 w-4" />
-        Add New Task
-      </Button>
-    )
-  }
-
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md overflow-hidden">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Create New Task</h2>
-            <Button variant="ghost" size="sm" onClick={() => setIsOpen(false)}>
-              ×
-            </Button>
-          </div>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogTrigger asChild>
+        <Button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(99,102,241,0.5)] border-none">
+          <Plus className="h-4 w-4" />
+          Add New Task
+        </Button>
+      </DialogTrigger>
 
+      <DialogContent className="sm:max-w-md glass-panel rounded-2xl shadow-2xl overflow-hidden text-white border border-white/20 p-6">
+        <DialogHeader className="mb-2">
+          <DialogTitle className="text-2xl font-bold tracking-tight drop-shadow-md">Create New Task</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
           {error && (
-            <Alert variant="destructive" className="mb-4">
+            <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
@@ -137,26 +135,27 @@ export function SimpleTaskForm({ userId }: { userId?: string }) {
             </Alert>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="title">Title</Label>
-              <Input id="title" name="title" value={formData.title} onChange={handleChange} required />
+              <Label htmlFor="title" className="text-white/80">Title</Label>
+              <Input id="title" name="title" value={formData.title} onChange={handleChange} required className="glass-input" />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description" className="text-white/80">Description</Label>
               <Textarea
                 id="description"
                 name="description"
                 value={formData.description}
                 onChange={handleChange}
                 rows={3}
+                className="glass-input resize-none"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="dueDate">Due Date</Label>
+                <Label htmlFor="dueDate" className="text-white/80">Due Date</Label>
                 <Input
                   id="dueDate"
                   name="dueDate"
@@ -164,11 +163,12 @@ export function SimpleTaskForm({ userId }: { userId?: string }) {
                   value={formData.dueDate}
                   onChange={handleChange}
                   required
+                  className="glass-input" style={{ colorScheme: "dark" }}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="dueTime">Due Time</Label>
+                <Label htmlFor="dueTime" className="text-white/80">Due Time</Label>
                 <Input
                   id="dueTime"
                   name="dueTime"
@@ -176,17 +176,18 @@ export function SimpleTaskForm({ userId }: { userId?: string }) {
                   value={formData.dueTime}
                   onChange={handleChange}
                   required
+                  className="glass-input" style={{ colorScheme: "dark" }}
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
+              <Label htmlFor="category" className="text-white/80">Category</Label>
               <Select value={formData.category} onValueChange={(value) => handleSelectChange("category", value)}>
-                <SelectTrigger>
+                <SelectTrigger className="glass-input">
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="glass-card text-white border-white/20">
                   <SelectItem value="Work">Work</SelectItem>
                   <SelectItem value="Personal">Personal</SelectItem>
                   <SelectItem value="Health">Health</SelectItem>
@@ -198,50 +199,51 @@ export function SimpleTaskForm({ userId }: { userId?: string }) {
 
             {isCustomCategory && (
               <div className="space-y-2">
-                <Label htmlFor="customCategory">Custom Category</Label>
+                <Label htmlFor="customCategory" className="text-white/80">Custom Category</Label>
                 <Input
                   id="customCategory"
                   name="customCategory"
                   value={formData.customCategory}
                   onChange={handleChange}
                   required
+                  className="glass-input"
                 />
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label>Priority</Label>
+            <div className="space-y-3 pt-2">
+              <Label className="text-white/80">Priority</Label>
               <RadioGroup
                 value={formData.priority}
                 onValueChange={(value) => handleSelectChange("priority", value)}
-                className="flex space-x-4"
+                className="flex space-x-6"
               >
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="low" id="low" />
-                  <Label htmlFor="low" className="text-green-600">
+                  <RadioGroupItem value="low" id="low" className="border-emerald-400 text-emerald-400" />
+                  <Label htmlFor="low" className="text-emerald-300 cursor-pointer">
                     Low
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="medium" id="medium" />
-                  <Label htmlFor="medium" className="text-yellow-600">
+                  <RadioGroupItem value="medium" id="medium" className="border-amber-400 text-amber-400" />
+                  <Label htmlFor="medium" className="text-amber-300 cursor-pointer">
                     Medium
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="high" id="high" />
-                  <Label htmlFor="high" className="text-red-600">
+                  <RadioGroupItem value="high" id="high" className="border-red-400 text-red-400" />
+                  <Label htmlFor="high" className="text-red-300 cursor-pointer">
                     High
                   </Label>
                 </div>
               </RadioGroup>
             </div>
 
-            <div className="flex justify-end space-x-2 pt-4">
-              <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
+            <div className="flex justify-end space-x-3 pt-6 border-t border-white/10 mt-6">
+              <Button type="button" variant="outline" onClick={() => setIsOpen(false)} className="border-white/20 text-white hover:bg-white/10 bg-transparent">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting} className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.5)] border-none">
                 {isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -254,7 +256,7 @@ export function SimpleTaskForm({ userId }: { userId?: string }) {
             </div>
           </form>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -55,7 +55,11 @@ export default async function AnalyticsPage() {
   // Check up to 30 days back
   for (let i = 0; i < 30; i++) {
     const dateString = currentDate.toISOString().split("T")[0]
-    const completedTasksOnDate = tasks.filter((task) => task.completed && task.dueDate === dateString)
+    const completedTasksOnDate = tasks.filter((task) => {
+      if (!task.completed || !task.dueDate) return false
+      const d = new Date(task.dueDate)
+      return d.toISOString().split("T")[0] === dateString
+    })
 
     if (completedTasksOnDate.length > 0) {
       streak++
@@ -68,16 +72,18 @@ export default async function AnalyticsPage() {
 
   // Calculate overdue tasks
   const overdueTasks = tasks.filter((task) => {
-    const dueDate = new Date(task.dueDate)
-    dueDate.setHours(0, 0, 0, 0)
-    return dueDate < today && !task.completed
+    if (!task.dueDate) return false
+    const d = new Date(task.dueDate)
+    d.setHours(0, 0, 0, 0)
+    return d < today && !task.completed
   })
 
   // Calculate tasks due today
   const todayTasks = tasks.filter((task) => {
-    const dueDate = new Date(task.dueDate)
-    dueDate.setHours(0, 0, 0, 0)
-    return dueDate.getTime() === today.getTime()
+    if (!task.dueDate) return false
+    const d = new Date(task.dueDate)
+    d.setHours(0, 0, 0, 0)
+    return d.getTime() === today.getTime()
   })
 
   // Calculate completion rate by day of week
@@ -85,8 +91,8 @@ export default async function AnalyticsPage() {
   const completionByDayOfWeek = dayNames.map((day) => {
     const dayIndex = dayNames.indexOf(day)
     const tasksOnDay = tasks.filter((task) => {
-      const dueDate = new Date(task.dueDate)
-      return dueDate.getDay() === dayIndex
+      if (!task.dueDate) return false
+      return new Date(task.dueDate).getDay() === dayIndex
     })
 
     const completedOnDay = tasksOnDay.filter((task) => task.completed).length
@@ -372,15 +378,14 @@ export default async function AnalyticsPage() {
                           <div className="text-sm font-medium mb-2">{day.day.substring(0, 3)}</div>
                           <div className="relative h-32 w-full flex items-end justify-center">
                             <div
-                              className={`w-8 rounded-t-md ${
-                                day.percentage >= 75
+                              className={`w-8 rounded-t-md ${day.percentage >= 75
                                   ? "bg-green-500"
                                   : day.percentage >= 50
                                     ? "bg-blue-500"
                                     : day.percentage >= 25
                                       ? "bg-amber-500"
                                       : "bg-red-500"
-                              }`}
+                                }`}
                               style={{ height: `${Math.max(day.percentage, 5)}%` }}
                             />
                           </div>
@@ -457,17 +462,16 @@ export default async function AnalyticsPage() {
                             <div key={task.id} className="flex items-center justify-between border-b pb-2">
                               <div className="flex items-center">
                                 <div
-                                  className={`h-2 w-2 rounded-full mr-3 ${
-                                    task.priority === "high"
+                                  className={`h-2 w-2 rounded-full mr-3 ${task.priority === "high"
                                       ? "bg-red-500"
                                       : task.priority === "medium"
                                         ? "bg-amber-500"
                                         : "bg-green-500"
-                                  }`}
+                                    }`}
                                 ></div>
                                 <span className="font-medium">{task.title}</span>
                               </div>
-                              <div className="text-sm text-red-500">{new Date(task.dueDate).toLocaleDateString()}</div>
+                              <div className="text-sm text-red-500">{task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No date'}</div>
                             </div>
                           ))}
                           {overdueTasks.length > 5 && (
@@ -494,13 +498,12 @@ export default async function AnalyticsPage() {
                             <div key={task.id} className="flex items-center justify-between border-b pb-2">
                               <div className="flex items-center">
                                 <div
-                                  className={`h-2 w-2 rounded-full mr-3 ${
-                                    task.priority === "high"
+                                  className={`h-2 w-2 rounded-full mr-3 ${task.priority === "high"
                                       ? "bg-red-500"
                                       : task.priority === "medium"
                                         ? "bg-amber-500"
                                         : "bg-green-500"
-                                  }`}
+                                    }`}
                                 ></div>
                                 <span
                                   className={`font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}

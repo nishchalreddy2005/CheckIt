@@ -33,6 +33,7 @@ export default function CalendarPage() {
   const [backgroundImage, setBackgroundImage] = useState<string | undefined>(undefined)
   const [view, setView] = useState<"calendar" | "list">("calendar")
   const [categories, setCategories] = useState<string[]>([])
+  const [userId, setUserId] = useState<string>("")
   const router = useRouter()
   const { toast } = useToast()
 
@@ -41,7 +42,8 @@ export default function CalendarPage() {
     try {
       const profileResult = await getProfile()
       if (profileResult.success && profileResult.user) {
-        setBackgroundImage(profileResult.user.calendarBackground)
+        setBackgroundImage(profileResult.user.calendarBackground || undefined)
+        setUserId(profileResult.user.id)
       }
     } catch (error) {
       console.error("Error fetching user profile:", error)
@@ -65,7 +67,7 @@ export default function CalendarPage() {
         setFilteredTasks(fetchedTasks)
 
         // Extract unique categories
-        const uniqueCategories = Array.from(new Set(fetchedTasks.map((task) => task.category)))
+        const uniqueCategories = Array.from(new Set(fetchedTasks.map((task) => task.category).filter(Boolean))) as string[]
         setCategories(uniqueCategories)
       } else {
         console.error("Fetched tasks is not an array:", fetchedTasks)
@@ -161,7 +163,7 @@ export default function CalendarPage() {
         toast({
           title: "Congratulations! 🎉",
           description: "You've successfully completed the task!",
-          variant: "success",
+          variant: "default",
         })
 
         // Confetti animation
@@ -234,7 +236,7 @@ export default function CalendarPage() {
   }
 
   // Handle search and filtering
-  const handleSearch = (filters) => {
+  const handleSearch = (filters: any) => {
     let filtered = [...tasks]
 
     // Filter by search term
@@ -242,7 +244,7 @@ export default function CalendarPage() {
       const searchLower = filters.searchTerm.toLowerCase()
       filtered = filtered.filter(
         (task) =>
-          task.title.toLowerCase().includes(searchLower) || task.description.toLowerCase().includes(searchLower),
+          task.title.toLowerCase().includes(searchLower) || (task.description || "").toLowerCase().includes(searchLower),
       )
     }
 
@@ -271,6 +273,7 @@ export default function CalendarPage() {
       fromDate.setHours(0, 0, 0, 0)
 
       filtered = filtered.filter((task) => {
+        if (!task.dueDate) return false
         const taskDate = new Date(task.dueDate)
         taskDate.setHours(0, 0, 0, 0)
         return taskDate >= fromDate
@@ -281,6 +284,7 @@ export default function CalendarPage() {
         toDate.setHours(23, 59, 59, 999)
 
         filtered = filtered.filter((task) => {
+          if (!task.dueDate) return false
           const taskDate = new Date(task.dueDate)
           return taskDate <= toDate
         })
@@ -307,6 +311,17 @@ export default function CalendarPage() {
             <Button onClick={handleRefresh} variant="outline" className="flex items-center gap-2">
               <RefreshCw size={16} />
               <span className="hidden sm:inline">Refresh</span>
+            </Button>
+
+            <Button
+              onClick={() => {
+                if (userId) window.open(`/api/calendar/${userId}`, "_blank")
+              }}
+              variant="outline"
+              className="flex items-center gap-2 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300"
+            >
+              <CalendarIcon size={16} />
+              <span className="hidden sm:inline">Export .ics</span>
             </Button>
 
             <Button

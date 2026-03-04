@@ -14,7 +14,7 @@ export function ToastContainer() {
             {toast.title && <ToastTitle>{toast.title}</ToastTitle>}
             {toast.description && <ToastDescription>{toast.description}</ToastDescription>}
           </div>
-          <ToastClose onClick={() => dismiss(toast.id)} />
+          <ToastClose onClick={() => dismiss(toast.id!)} />
         </Toast>
       ))}
       <ToastViewport />

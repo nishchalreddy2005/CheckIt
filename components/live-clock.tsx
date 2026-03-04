@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import type { User } from "@/lib/types"
 
 // Map of timezone identifiers to their IANA timezone strings
-const timezoneMap = {
+const timezoneMap: Record<string, string> = {
   UTC: "UTC",
   IST: "Asia/Kolkata", // Indian Standard Time
   EST: "America/New_York",

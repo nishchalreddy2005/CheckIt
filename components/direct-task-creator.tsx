@@ -93,7 +93,7 @@ export function DirectTaskCreator() {
   }
 
   return (
-    <Card className="w-full">
+    <Card className="w-full glass-card text-white border-white/20">
       <CardHeader>
         <CardTitle>Create New Task</CardTitle>
       </CardHeader>
@@ -141,7 +141,7 @@ export function DirectTaskCreator() {
               <SelectTrigger>
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="glass-card text-white border-white/20">
                 <SelectItem value="Work">Work</SelectItem>
                 <SelectItem value="Personal">Personal</SelectItem>
                 <SelectItem value="Health">Health</SelectItem>
@@ -156,7 +156,7 @@ export function DirectTaskCreator() {
               <SelectTrigger>
                 <SelectValue placeholder="Select priority" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="glass-card text-white border-white/20">
                 <SelectItem value="low">Low</SelectItem>
                 <SelectItem value="medium">Medium</SelectItem>
                 <SelectItem value="high">High</SelectItem>

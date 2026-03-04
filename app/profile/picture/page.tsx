@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
@@ -22,7 +22,7 @@ export default function ProfilePicturePage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
   // Fetch user data
-  useState(() => {
+  useEffect(() => {
     async function fetchUser() {
       try {
         const response = await fetch("/api/user")

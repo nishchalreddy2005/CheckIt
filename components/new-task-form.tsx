@@ -152,7 +152,7 @@ export function NewTaskForm({ userId }: { userId?: string }) {
       <DialogTrigger asChild>
         <Button>Add New Task</Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] glass-panel border-white/20 text-white">
         <DialogHeader>
           <DialogTitle>Create New Task</DialogTitle>
         </DialogHeader>
@@ -224,7 +224,7 @@ export function NewTaskForm({ userId }: { userId?: string }) {
               <SelectTrigger>
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="glass-card text-white border-white/20">
                 <SelectItem value="Work">Work</SelectItem>
                 <SelectItem value="Personal">Personal</SelectItem>
                 <SelectItem value="Health">Health</SelectItem>
